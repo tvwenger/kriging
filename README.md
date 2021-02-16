@@ -12,8 +12,8 @@ In the presence of drift (a varying mean value across the data space),
 the observed semivariogram can be biased (see Starks & Fang, 1982,
 Mathematical Geology, 14, 4:
 https://doi.org/10.1007/BF01032592). `kriging` attempts to remove this
-bias by first removing a fitted drift polynomial term before
-generating the semivariogram.
+bias by subtracting a fitted polynomial drift term before generating
+the semivariogram.
 
 ## Installation
 Install directly from this repository:
@@ -48,7 +48,8 @@ Arguments:
 
 * `e_data_obs` (optional) is the `N`-length scalar array of observed
   value uncertainties. This is used to weight the data when fitting
-  the drift polynomial. If `None` (default), then use equal weights.
+  the polynomial drift term. If `None` (default), then use equal
+  weights.
 
 * `model` (optional) is the assumed semivariogram model. Available
   values are `gaussian` (default), `spherical`, and `exponential`.
