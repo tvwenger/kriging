@@ -116,8 +116,7 @@ ax.set_aspect('equal')
 fig.savefig('example.png')
 plt.close(fig)
 ```
-<img src='https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram.png' width='50%' />
-<img src='https://raw.githubusercontent.com/tvwenger/kriging/master/example/example.png' width='50%' />
+<img src='https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram.png' width='45%' /><img src='https://raw.githubusercontent.com/tvwenger/kriging/master/example/example.png' width='45%' />
 
 ## Issues and Contributing
 
