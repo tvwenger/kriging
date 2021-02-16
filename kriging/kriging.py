@@ -31,7 +31,7 @@ from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 from . import models
 
-_VERSION = "1.0"
+_VERSION = "1.1"
 
 _MODELS = {
     "gaussian": models.gaussian,
