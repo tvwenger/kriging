@@ -31,7 +31,7 @@ from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 from . import models
 
-_VERSION = "1.1"
+_VERSION = "1.2"
 
 _MODELS = {
     "gaussian": models.gaussian,
@@ -123,15 +123,16 @@ def kriging(
         ]
     )
 
-    # polynomial residuals
-    def residuals(theta):
-        res = design.dot(theta) - data_obs
-        return np.sum((res / e_data_obs) ** 2.0)
+    # polynomial soft_l1 loss function
+    def loss(theta):
+        res = (design.dot(theta) - data_obs) / e_data_obs
+        return np.sum(2.0 * np.sqrt(1.0 + res ** 2.0) - 1.0)
 
     # fit polynomial drift
     num_powers = design.shape[1]
     theta0 = np.zeros(num_powers)
-    res = minimize(residuals, theta0)
+    # robust least squares
+    res = minimize(loss, theta0)
 
     # remove polynomial drift
     data_obs_res = data_obs - design.dot(res.x)
@@ -183,17 +184,23 @@ def kriging(
     # fit semivariogram model to binned data
     semivariogram = _MODELS[model]
 
-    def residual(theta):
-        res = semivariogram(theta, lag_mean) - semivar_mean
-        return np.sum((res / semivar_std) ** 2.0)
+    # semivariogram soft_l1 loss function
+    def loss(theta):
+        res = (semivariogram(theta, lag_mean) - semivar_mean) / semivar_std
+        return np.sum(2.0 * np.sqrt(1.0 + res ** 2.0) - 1.0)
 
     p0 = [
         np.max(semivar_mean) - np.min(semivar_mean),
         np.median(lag_mean),
         semivar_mean[0],
     ]
-    bounds = [(-np.inf, np.inf), (0.0, np.inf), (0.0, np.inf)]
-    res = minimize(residual, p0, bounds=bounds, method="L-BFGS-B")
+    bounds = [
+        (0.0, np.inf),
+        (np.min(lag_mean), np.max(lag_mean)),
+        (0.0, np.inf),
+    ]
+    # robust least squares
+    res = minimize(loss, p0, bounds=bounds, method="L-BFGS-B")
 
     # plot fitted semivariogram
     if plot is not None:
