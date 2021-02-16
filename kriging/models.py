@@ -46,7 +46,7 @@ def spherical(theta, x):
     c = x < range
     ret[c] = (
         sill
-        * (1.0 - (1.0 - x[c] / (range / 3.0)) * np.exp(-x[c] / (range / 3.0)))
+        * ((3.0 * x[c]) / (2.0 * range) - (x[c] ** 3.0) / (2.0 * range ** 3.0))
         + nugget
     )
     return ret

@@ -192,7 +192,8 @@ def kriging(
         np.median(lag_mean),
         semivar_mean[0],
     ]
-    res = minimize(residual, p0, method="L-BFGS-B")
+    bounds = [(-np.inf, np.inf), (0.0, np.inf), (0.0, np.inf)]
+    res = minimize(residual, p0, bounds=bounds, method="L-BFGS-B")
 
     # plot fitted semivariogram
     if plot is not None:
