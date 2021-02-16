@@ -1,5 +1,5 @@
 # kriging
-## Ordinary and universal kriging in N dimensions.
+### Ordinary and universal kriging in N dimensions.
 
 `kriging` is a basic implementation of
 [kriging](https://en.wikipedia.org/wiki/Kriging), a method of
@@ -15,7 +15,7 @@ https://doi.org/10.1007/BF01032592). `kriging` attempts to remove this
 bias by first removing a fitted drift polynomial term before
 generating the semivariogram.
 
-### Installation
+## Installation
 Install directly from this repository:
 ```bash
 pip install git+https://github.com/tvwenger/kriging.git
@@ -26,7 +26,7 @@ Or, clone the repository and:
 python setup.py install
 ```
 
-### Usage
+## Usage
 ```python
 from kriging import kriging
 data_interp, var_interp = kriging.kriging(
@@ -75,7 +75,7 @@ Return values:
 * `var_interp` is the `L`-length scalar array of variances at each
   `coord_interp` position.
 
-### Example
+## Example
 ```python
 import numpy as np
 import matplotlib.pyplot as plt
@@ -101,7 +101,7 @@ coord_interp = np.vstack((xgrid.flatten(), ygrid.flatten())).T
 data_interp, var_interp = kriging.kriging(
     coord_obs, data_obs, coord_interp, e_data_obs=e_data_obs,
     model='gaussian', deg=1, nbins=10, bin_number=True,
-    plot='semivariogram.pdf')
+    plot='semivariogram.png')
 
 # plot data on top of interpolated grid
 fig, ax = plt.subplots()
@@ -113,18 +113,18 @@ ax.scatter(
     vmin=0, vmax=20)
 fig.colorbar(cax)
 ax.set_aspect('equal')
-fig.savefig('example.pdf')
+fig.savefig('example.png')
 plt.close(fig)
 ```
-![Semivariogram](https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram.pdf)
-![Example](https://raw.githubusercontent.com/tvwenger/kriging/master/example/example.pdf)
+![Semivariogram](https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram.png)
+![Example](https://raw.githubusercontent.com/tvwenger/kriging/master/example/example.png)
 
-### Issues and Contributing
+## Issues and Contributing
 
 Please submit issues or pull requests via
 [Github](https://github.com/tvwenger/kriging).
 
-### License and Warranty
+## License and Warranty
 
 GNU General Public License v3 (GNU GPLv3)
 
