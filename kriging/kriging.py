@@ -27,6 +27,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import numpy as np
 import itertools
+import sparse
 from scipy.spatial.distance import cdist, squareform
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
@@ -154,23 +155,27 @@ def kriging(
     # remove polynomial drift
     data_obs_res = data_obs - design.dot(poly_coeff)
 
-    # generate pairwise distance, pairwise squared difference,
-    # Jacobian matrix, and the diagonal Hessian matrix dot data_cov
+    # generate pairwise distance, pairwise squared difference
+    # including second order (Hessian) correction,
+    # Jacobian matrix, and the Hessian tensor
     num_pairs = len(data_obs) * (len(data_obs) - 1) // 2
     coord_obs_dist = np.zeros(num_pairs)
-    data_sqdiff = np.zeros(num_pairs)
-    data_sqdiff_jac = np.zeros((num_pairs, len(data_obs)))
-    data_sqdiff_hess_cov_diag = np.zeros(num_pairs)
+    data_diff2 = np.zeros(num_pairs)
+    data_diff2_jac = sparse.COO([], shape=(num_pairs, len(data_obs)))
+    data_diff2_hess = sparse.COO(
+        [], shape=(num_pairs, len(data_obs), len(data_obs))
+    )
     for i, (a, b) in enumerate(
         itertools.combinations(range(len(data_obs)), 2)
     ):
         coord_obs_dist[i] = np.sum((coord_obs[a] - coord_obs[b]) ** 2.0)
         data_diff = data_obs_res[a] - data_obs_res[b]
-        data_sqdiff[i] = data_diff ** 2.0
         data_sqdiff_jac[i, a] = 2.0 * data_diff
         data_sqdiff_jac[i, b] = -2.0 * data_diff
-        data_sqdiff_hess_cov_diag[i] = 2.0 * (
-            data_cov[a, a] + data_cov[b, b] - data_cov[a, b]
+        data_sqdiff_hess[i, a, a] = 2.0
+        data_sqdiff_hess[i, b, b] = -2.0
+        data_sqdiff[i] = data_diff ** 2.0 + 0.5 * np.trace(
+            data_sqdiff_hess[i].dot(data_cov)
         )
 
     # pairwise squared difference covariance
