@@ -22,16 +22,17 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 2021-02-15 Trey V. Wenger
+2021-03-10 Trey V. Wenger - v1.3: Add support for covariances
 """
 
 import numpy as np
 import itertools
-from scipy.spatial.distance import pdist, cdist, squareform
+from scipy.spatial.distance import cdist, squareform
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 from . import models
 
-_VERSION = "1.2"
+_VERSION = "1.3"
 
 _MODELS = {
     "gaussian": models.gaussian,
@@ -45,6 +46,7 @@ def kriging(
     data_obs,
     coord_interp,
     e_data_obs=None,
+    data_cov=None,
     model="gaussian",
     deg=0,
     nbins=6,
@@ -64,6 +66,9 @@ def kriging(
         e_data_obs :: (N,) array of scalars
             Uncertainty of observed data values. If None, use equal
             data weights.
+        data_cov :: (N, N) array of scalars
+            The data covariance matrix. If supplied, the value of
+            e_data_obs is ignored.
         model :: string
             Semivariogram model. One of the keys of _MODELS.
         deg :: integer
@@ -92,12 +97,24 @@ def kriging(
         raise ValueError("Input coordinate array and data array mismatched")
     if e_data_obs is not None and e_data_obs.shape[0] != data_obs.shape[0]:
         raise ValueError("Input data array and e_data array mismatched")
+    if data_cov is not None and data_cov.ndim != 2:
+        raise ValueError("Covariance matrix must have two dimensions")
+    if data_cov is not None and data_cov.shape[0] != data_cov.shape[1]:
+        raise ValueError("Covariance matrix must be square")
+    if data_cov is not None and data_cov.shape[0] != data_obs.shape[0]:
+        raise ValueError("Covariance matrix and input data array mismatched")
     if model not in _MODELS:
         raise ValueError("Unsupported variogram model")
 
-    # equal weights for data if no errors supplied
-    if e_data_obs is None:
-        e_data_obs = np.ones(len(data_obs))
+    data_weights = False
+    if data_cov is not None:
+        data_weights = True
+    else:
+        # equal weights for data if no errors supplied
+        data_cov = np.eye(len(data_obs))
+        if e_data_obs is not None:
+            data_weights = True
+            data_cov = data_cov * e_data_obs ** 2.0
 
     # generate polynomial basis vectors
     def basis(size, i):
@@ -108,7 +125,7 @@ def kriging(
     num_data, num_dim = coord_obs.shape
     polynomial_basis = [basis(num_dim + 1, i) for i in range(num_dim + 1)]
 
-    # generate design matrix
+    # generate polynomial design matrix
     polynomial_powers = np.sum(
         list(itertools.combinations_with_replacement(polynomial_basis, deg)),
         axis=1,
@@ -122,34 +139,51 @@ def kriging(
             for p in polynomial_powers
         ]
     )
-
-    # polynomial soft_l1 loss function
-    def loss(theta):
-        res = (design.dot(theta) - data_obs) / e_data_obs
-        return np.sum(2.0 * np.sqrt(1.0 + res ** 2.0) - 1.0)
-
-    # fit polynomial drift
     num_powers = design.shape[1]
-    theta0 = np.zeros(num_powers)
-    # robust least squares
-    res = minimize(loss, theta0)
+
+    # evalue data_cov^-1 (dot) design
+    cov_dot_design = np.linalg.solve(data_cov, design)
+    # evaluate data_cov^-1 (dot) data_obs
+    cov_dot_data = np.linalg.solve(data_cov, data_obs)
+
+    # polynomial coefficients
+    poly_coeff = np.linalg.inv(design.T.dot(cov_dot_design)).dot(
+        design.T.dot(cov_dot_data)
+    )
 
     # remove polynomial drift
-    data_obs_res = data_obs - design.dot(res.x)
+    data_obs_res = data_obs - design.dot(poly_coeff)
 
-    # evaluate pairwise distance between observations
-    dist_obs = pdist(coord_obs, "euclidean")
+    # generate pairwise distance, pairwise squared difference,
+    # Jacobian matrix, and the diagonal Hessian matrix dot data_cov
+    num_pairs = len(data_obs) * (len(data_obs) - 1) // 2
+    coord_obs_dist = np.zeros(num_pairs)
+    data_sqdiff = np.zeros(num_pairs)
+    data_sqdiff_jac = np.zeros((num_pairs, len(data_obs)))
+    data_sqdiff_hess_cov_diag = np.zeros(num_pairs)
+    for i, (a, b) in enumerate(
+        itertools.combinations(range(len(data_obs)), 2)
+    ):
+        coord_obs_dist[i] = np.sum((coord_obs[a] - coord_obs[b]) ** 2.0)
+        data_diff = data_obs_res[a] - data_obs_res[b]
+        data_sqdiff[i] = data_diff ** 2.0
+        data_sqdiff_jac[i, a] = 2.0 * data_diff
+        data_sqdiff_jac[i, b] = -2.0 * data_diff
+        data_sqdiff_hess_cov_diag[i] = 2.0 * (
+            data_cov[a, a] + data_cov[b, b] - data_cov[a, b]
+        )
 
-    # evaluate pairwise squared difference between observations
-    data_diff_obs = 0.5 * pdist(data_obs_res[:, np.newaxis], "sqeuclidean")
+    # pairwise squared difference covariance
+    data_sqdiff_cov = data_sqdiff_jac.dot(data_cov.dot(data_sqdiff_jac.T))
+    data_sqdiff_cov += 0.5 * np.diag(data_sqdiff_hess_cov_diag ** 2.0)
 
     # define lag bins
-    dist_min = np.min(dist_obs)
-    dist_max = np.max(dist_obs)
+    dist_min = np.min(coord_obs_dist)
+    dist_max = np.max(coord_obs_dist)
     if bin_number:
         # bins have equal number of points in each
-        num_points = int(len(dist_obs) / nbins)
-        dist_sorted = np.sort(dist_obs)
+        num_points = int(len(coord_obs_dist) / nbins)
+        dist_sorted = np.sort(coord_obs_dist)
         bins = [dist_sorted[n * num_points] for n in range(nbins)]
     else:
         # bins have fixed size
@@ -158,27 +192,39 @@ def kriging(
     bins.append(dist_max)
 
     # bin data
-    bin_data = np.zeros(nbins)
+    weights = 1.0 / np.diag(data_sqdiff_cov)
+    bin_pop = np.zeros(nbins)
     lag_mean = np.ones(nbins) * np.nan
-    lag_std = np.ones(nbins) * np.nan
-    semivar_mean = np.ones(nbins) * np.nan
+    semivar = np.ones(nbins) * np.nan
     semivar_std = np.ones(nbins) * np.nan
     for n in range(nbins):
-        members = (dist_obs >= bins[n]) * (dist_obs <= bins[n + 1])
-        bin_data[n] = np.sum(members)
-        if bin_data[n] > 0:
-            lag_mean[n] = np.mean(dist_obs[members])
-            lag_std[n] = np.std(dist_obs[members]) / np.sqrt(bin_data[n])
-            semivar_mean[n] = np.mean(data_diff_obs[members])
-            semivar_std[n] = np.std(data_diff_obs[members]) / np.sqrt(
-                bin_data[n]
+        # indicies of bin members
+        idx = np.where(
+            (coord_obs_dist >= bins[n]) & (coord_obs_dist <= bins[n + 1])
+        )[0]
+        bin_pop[n] = len(idx)
+        if bin_pop[n] > 0:
+            lag_mean[n] = np.average(coord_obs_dist[idx], weights=weights[idx])
+            semivar[n] = 0.5 * np.average(
+                data_sqdiff[idx], weights=weights[idx]
+            )
+            semivar_std[n] = 0.5 * np.sqrt(
+                0.5
+                * np.sum(
+                    [
+                        1.0 / weights[i]
+                        + 1.0 / weights[j]
+                        + (data_sqdiff_cov[i, j] / weights[i] * weights[j])
+                        for i in idx
+                        for j in idx
+                    ]
+                )
             )
 
     # remove empty/nan bins
-    bad = np.isnan(semivar_mean)
+    bad = np.isnan(semivar)
     lag_mean = lag_mean[~bad]
-    lag_std = lag_std[~bad]
-    semivar_mean = semivar_mean[~bad]
+    semivar = semivar[~bad]
     semivar_std = semivar_std[~bad]
 
     # fit semivariogram model to binned data
@@ -186,13 +232,13 @@ def kriging(
 
     # semivariogram soft_l1 loss function
     def loss(theta):
-        res = (semivariogram(theta, lag_mean) - semivar_mean) / semivar_std
+        res = (semivariogram(theta, lag_mean) - semivar) / semivar_std
         return np.sum(2.0 * np.sqrt(1.0 + res ** 2.0) - 1.0)
 
     p0 = [
-        np.max(semivar_mean) - np.min(semivar_mean),
+        np.max(semivar) - np.min(semivar),
         np.median(lag_mean),
-        semivar_mean[0],
+        semivar[0],
     ]
     bounds = [
         (0.0, np.inf),
@@ -209,7 +255,7 @@ def kriging(
         fig, ax = plt.subplots()
         ax.errorbar(
             lag_mean,
-            semivar_mean,
+            semivar,
             yerr=semivar_std,
             fmt="o",
             color="k",
@@ -222,8 +268,8 @@ def kriging(
         fig.savefig(plot, bbox_inches="tight")
         plt.close(fig)
 
-    # Generate the kriging matrix
-    dist_mat = squareform(dist_obs)
+    # Generate the kriging weights matrix
+    dist_mat = squareform(coord_obs_dist)
     krig_mat = np.zeros((num_data + num_powers, num_data + num_powers))
     krig_mat[:num_data, :num_data] = semivariogram(res.x, dist_mat)
     krig_mat[num_data:, :num_data] = design.T
