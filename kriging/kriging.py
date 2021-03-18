@@ -34,7 +34,7 @@ import corner
 
 from . import models
 
-_VERSION = "1.3"
+_VERSION = "2.0"
 
 _MODELS = {
     "gaussian": models.gaussian,
