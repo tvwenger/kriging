@@ -108,7 +108,7 @@ interp_data, interp_var = krig.interp(interp_pos)
 * `interp_var` is the `L`-length scalar array of variances at each
   `interp_pos` position.
 
-## Example
+## Examples
 ```python
 import numpy as np
 import matplotlib.pyplot as plt
@@ -122,48 +122,52 @@ num_data = 100
 obs_pos = np.random.uniform(-10, 10, size=(num_data, 2))
 # the mean value varies quadratically
 obs_data = 10.0 + 0.1 * obs_pos.prod(axis=1)
-# add some noise that increases radially
-e_obs_data = 0.1 + 0.1*np.sqrt((obs_pos**2.0).sum(axis=1))
-obs_data += e_obs_data * np.random.randn(num_data)
+# add a small amount of random noise
+# obs_data += 0.1 * np.random.randn(len(obs_data))
 
 # interpolation grid
 xgrid, ygrid = np.mgrid[-10:10:100j, -10:10:100j]
 interp_pos = np.vstack((xgrid.flatten(), ygrid.flatten())).T
 
-# universal kriging with linear drift term
-krig = kriging.Kriging(obs_pos, obs_data, e_obs_data=e_obs_data)
-krig.fit(model="gaussian", deg=1, nbins=10, bin_number=True, nsims=10000,
-         corner_fname="corner.png", semivariogram_fname="semivariogram.png")
+# plot function
+def plot(data, fname, color=None, vmin=None, vmax=None, label=None):
+    fig, ax = plt.subplots()
+    cax = ax.imshow(
+        data.reshape(100, 100).T, origin="lower", interpolation="none",
+        extent=[-10, 10, -10, 10], vmin=vmin, vmax=vmax)
+    ax.scatter(
+        obs_pos[:, 0], obs_pos[:, 1], c=color, edgecolor="k",
+        vmin=vmin, vmax=vmax)
+    fig.colorbar(cax, label=label)
+    ax.set_aspect("equal")
+    fig.savefig(fname)
+    plt.close(fig)
+
+# ordinary kriging
+krig = kriging.Kriging(obs_pos, obs_data)
+krig.fit(model="gaussian", nbins=10, bin_number=True,
+         semivariogram_fname="example/semivariogram_ordinary.png")
 interp_data, interp_var = krig.interp(interp_pos)
 
 # plot data on top of interpolated grid
-fig, ax = plt.subplots()
-cax = ax.imshow(
-    interp_data.reshape(100, 100).T, origin='lower', interpolation='none',
-    extent=[-10, 10, -10, 10], vmin=0, vmax=20)
-ax.scatter(
-    obs_pos[:, 0], obs_pos[:, 1], c=obs_data, edgecolor='k',
-    vmin=0, vmax=20)
-fig.colorbar(cax, label="Interpolation")
-ax.set_aspect('equal')
-fig.savefig('example.png')
-plt.close(fig)
+plot(interp_data, "example/interp_ordinary.png", color=obs_data,
+     vmin=0.0, vmax=20.0, label="Interpolation")
+plot(np.sqrt(interp_var), "example/interp_std.png", color=None,
+     vmin=None, vmax=None, label="Standard Deviation")
 
-# plot standard deviation grid
-fig, ax = plt.subplots()
-cax = ax.imshow(
-    np.sqrt(interp_var).reshape(100, 100).T, origin='lower', interpolation='none',
-    extent=[-10, 10, -10, 10])
-ax.scatter(
-    obs_pos[:, 0], obs_pos[:, 1], c='k')
-fig.colorbar(cax, label="Standard Deviation")
-ax.set_aspect('equal')
-fig.savefig('example_std.png')
-plt.close(fig)
+# add some noise that increases radially
+e_obs_data = 0.1 + 0.1*np.sqrt((obs_pos**2.0).sum(axis=1))
+obs_data += e_obs_data * np.random.randn(num_data)
+
+
+
+
+
+
 ```
-<img src='https://raw.githubusercontent.com/tvwenger/kriging/master/example/corner.png' width='45%' /><img src='https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram.png' width='45%' />
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/corner.png" width="45%" /><img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram.png" width="45%" />
 
-<img src='https://raw.githubusercontent.com/tvwenger/kriging/master/example/example.png' width='45%' /><img src='https://raw.githubusercontent.com/tvwenger/kriging/master/example/example_std.png' width='45%' />
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/example.png" width="45%" /><img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/example_std.png" width="45%" />
 
 ## Issues and Contributing
 
