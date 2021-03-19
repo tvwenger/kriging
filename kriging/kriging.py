@@ -385,4 +385,6 @@ class Kriging:
             solution[:, : self.num_data] * self.obs_data, axis=1
         )
         var_interp = np.sum(solution * interp_mat, axis=1)
+        # catch small negative variances
+        var_interp[var_interp < 0.0] = 0.0
         return data_interp, var_interp

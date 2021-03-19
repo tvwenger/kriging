@@ -109,6 +109,7 @@ interp_data, interp_var = krig.interp(interp_pos)
   `interp_pos` position.
 
 ## Examples
+### Ordinary Kriging
 ```python
 import numpy as np
 import matplotlib.pyplot as plt
@@ -122,19 +123,13 @@ num_data = 100
 obs_pos = np.random.uniform(-10, 10, size=(num_data, 2))
 # the mean value varies quadratically
 obs_data = 10.0 + 0.1 * obs_pos.prod(axis=1)
-# add a small amount of random noise
-# obs_data += 0.1 * np.random.randn(len(obs_data))
-
-# interpolation grid
-xgrid, ygrid = np.mgrid[-10:10:100j, -10:10:100j]
-interp_pos = np.vstack((xgrid.flatten(), ygrid.flatten())).T
 
 # plot function
 def plot(data, fname, color=None, vmin=None, vmax=None, label=None):
     fig, ax = plt.subplots()
     cax = ax.imshow(
-        data.reshape(100, 100).T, origin="lower", interpolation="none",
-        extent=[-10, 10, -10, 10], vmin=vmin, vmax=vmax)
+        data.reshape(120, 120).T, origin="lower", interpolation="none",
+        extent=[-12, 12, -12, 12], vmin=vmin, vmax=vmax)
     ax.scatter(
         obs_pos[:, 0], obs_pos[:, 1], c=color, edgecolor="k",
         vmin=vmin, vmax=vmax)
@@ -143,6 +138,17 @@ def plot(data, fname, color=None, vmin=None, vmax=None, label=None):
     fig.savefig(fname)
     plt.close(fig)
 
+# interpolation grid
+xgrid, ygrid = np.mgrid[-12:12:120j, -12:12:120j]
+interp_pos = np.vstack((xgrid.flatten(), ygrid.flatten())).T
+
+# evaluate "true" field, plot
+true_data = 10.0 + 0.1 * interp_pos.prod(axis=1)
+plot(true_data, "example/truth.png", color='k',
+     vmin=0.0, vmax=25.0, label="Truth")
+```
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/truth.png" width="45%" />
+```python
 # ordinary kriging
 krig = kriging.Kriging(obs_pos, obs_data)
 krig.fit(model="gaussian", nbins=10, bin_number=True,
@@ -151,13 +157,65 @@ interp_data, interp_var = krig.interp(interp_pos)
 
 # plot data on top of interpolated grid
 plot(interp_data, "example/interp_ordinary.png", color=obs_data,
-     vmin=0.0, vmax=20.0, label="Interpolation")
-plot(np.sqrt(interp_var), "example/interp_std.png", color=None,
+     vmin=0.0, vmax=25.0, label="Interpolation")
+plot(np.sqrt(interp_var), "example/std_ordinary.png", color='k',
      vmin=None, vmax=None, label="Standard Deviation")
 
+# plot difference between interpolated and true grid
+plot(true_data - interp_data, "example/diff_ordinary.png", color='k',
+     vmin=-0.2, vmax=0.2, label="Truth $-$ Interp")
+```
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram_ordinary.png" width="45%" /><img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/interp_ordinary.png" width="45%" />
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/std_ordinary.png" width="45%" /><img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/diff_ordinary.png" width="45%" />
+
+### Ordinary Kriging with Constant Noise
+```python
+# add constant random noise
+e_obs_data = 0.1 * np.ones(len(obs_data))
+obs_noisy_data = obs_data + e_obs_data * np.random.randn(len(obs_data))
+
+# ordinary kriging
+krig = kriging.Kriging(obs_pos, obs_noisy_data, e_obs_data=e_obs_data)
+krig.fit(model="gaussian", deg=1, nbins=10, bin_number=True, nsims=10000,
+         corner_fname="example/corner_ordinary_noise.png",
+         semivariogram_fname="example/semivariogram_ordinary_noise.png")
+interp_data, interp_var = krig.interp(interp_pos)
+
+# plot data on top of interpolated grid
+plot(interp_data, "example/interp_ordinary_noise.png", color=obs_noisy_data,
+     vmin=0.0, vmax=25.0, label="Interpolation")
+plot(np.sqrt(interp_var), "example/std_ordinary_noise.png", color='k',
+     vmin=None, vmax=None, label="Standard Deviation")
+
+# plot difference between interpolated and true grid
+plot(true_data - interp_data, "example/diff_ordinary_noise.png", color='k',
+     vmin=None, vmax=None, label="Truth $-$ Interp")
+```
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/corner_ordinary_noise.png" width="45%" />
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram_ordinary_noise.png" width="45%" /><img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/interp_ordinary_noise.png" width="45%" />
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/std_ordinary_noise.png" width="45%" /><img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/diff_ordinary_noise.png" width="45%" />
+```python
+# universal kriging with linear drift, accounting for error
+krig = kriging.Kriging(obs_pos, obs_data, e_obs_data=e_obs_data)
+krig.fit(model="gaussian", deg=1, nbins=10, bin_number=True, nsims=10000,
+         corner_fname="example/corner_universal_noise.png",
+         semivariogram_fname="example/semivariogram_universal_noise.png")
+interp_data, interp_var = krig.interp(interp_pos)
+
+# plot data on top of interpolated grid
+plot(interp_data, "example/interp_universal_noise.png", color=obs_data,
+     vmin=0.0, vmax=25.0, label="Interpolation")
+plot(np.sqrt(interp_var), "example/std_universal_noise.png", color='k',
+     vmin=None, vmax=None, label="Standard Deviation")
+
+# plot difference between interpolated and true grid
+plot(true_data - interp_data, "example/diff_universal_noise.png", color='k',
+     vmin=None, vmax=None, label="Truth $-$ Interp")
+
 # add some noise that increases radially
-e_obs_data = 0.1 + 0.1*np.sqrt((obs_pos**2.0).sum(axis=1))
+e_obs_data += 0.1*np.sqrt((obs_pos**2.0).sum(axis=1))
 obs_data += e_obs_data * np.random.randn(num_data)
+```
 
 
 
