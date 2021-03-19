@@ -120,8 +120,6 @@ class Kriging:
         nbins=6,
         bin_number=False,
         nsims=1000,
-        corner_fname=None,
-        semivariogram_fname=None,
     ):
         """
         Fit a polynomial drift and semivariogram model to the observed data.
@@ -141,11 +139,14 @@ class Kriging:
                 Number of Monte Carlo semivariogram model fitting simulations.
                 If there are no observed data errors (i.e. if e_obs_data and
                 obs_data_cov are None), then only one simulation is performed.
-            corner_fname :: string
-                If not None, plot the semivariogram model parameter corner
-                plot and save to this filename
-            semivariogram_fname :: string
-                If not None, plot the semivariogram and save to this filename
+
+        Returns: semivariogram_fig, corner_fig
+            semivariogram_fig :: matplotlib.pyplot.Figure
+                The semivariogram plot
+            corner_fig :: matplotlib.pyplot.Figure
+                The semivariogram model parameter corner plot if
+                either e_obs_data or obs_data_cov is not None,
+                otherwise None
         """
         # generate polynomial basis vectors
         def basis(size, i):
@@ -274,41 +275,38 @@ class Kriging:
         self.model_params_pt = np.mean(model_params, axis=0)
 
         # plot fitted semivariogram and parameter correlations
-        if resample and corner_fname is not None:
+        if resample:
             # generate corner plot
-            fig = corner.corner(
+            corner_fig = corner.corner(
                 model_params,
                 labels=["Sill", "Range", "Nugget"],
                 truths=self.model_params_pt,
             )
-            fig.savefig(corner_fname, bbox_inches="tight")
-            plt.close(fig)
+        else:
+            corner_fig = None
 
         # plot fitted semivariogram
-        if semivariogram_fname is not None:
-            xfit = np.linspace(0.0, 1.1 * lag_mean[-1], 100)
-            yfit = self.semivariogram(self.model_params_pt, xfit)
-            yfits = np.array(
-                [self.semivariogram(params, xfit) for params in model_params]
+        xfit = np.linspace(0.0, 1.1 * lag_mean[-1], 100)
+        yfit = self.semivariogram(self.model_params_pt, xfit)
+        yfits = np.array(
+            [self.semivariogram(params, xfit) for params in model_params]
+        )
+        yfits_lower = np.min(yfits, axis=0)
+        yfits_upper = np.max(yfits, axis=0)
+        semivariogram_fig, ax = plt.subplots()
+        if resample:
+            ax.violinplot(
+                semivars, positions=lag_mean, widths=1.0, showmeans=True
             )
-            yfits_lower = np.min(yfits, axis=0)
-            yfits_upper = np.max(yfits, axis=0)
-            fig, ax = plt.subplots()
-            if resample:
-                ax.violinplot(
-                    semivars, positions=lag_mean, widths=1.0, showmeans=True
-                )
-                ax.fill_between(
-                    xfit, yfits_lower, yfits_upper, color="r", alpha=0.2
-                )
-            else:
-                ax.plot(lag_mean, semivars[0], "ko")
-            ax.plot(xfit, yfit, "r-")
-            ax.set_xlabel("Lag")
-            ax.set_ylabel("Semivariance")
-            fig.tight_layout()
-            fig.savefig(semivariogram_fname, bbox_inches="tight")
-            plt.close(fig)
+            ax.fill_between(
+                xfit, yfits_lower, yfits_upper, color="r", alpha=0.2
+            )
+        else:
+            ax.plot(lag_mean, semivars[0], "ko")
+        ax.plot(xfit, yfit, "r-")
+        ax.set_xlabel("Lag")
+        ax.set_ylabel("Semivariance")
+        semivariogram_fig.tight_layout()
 
         # build kriging system of equations matrix
         self.krig_mat = np.zeros(
@@ -329,6 +327,8 @@ class Kriging:
         ] = self.polynomial_design
         if not self.has_obs_errors:
             np.fill_diagonal(self.krig_mat, 0.0)
+
+        return semivariogram_fig, corner_fig
 
     def interp(self, interp_pos):
         """
