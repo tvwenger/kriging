@@ -1,19 +1,25 @@
-# kriging
+# kriging (v2.0)
 ### Ordinary and universal kriging in N dimensions.
 
 `kriging` is a basic implementation of
 [kriging](https://en.wikipedia.org/wiki/Kriging), a method of
 interpolation using Gaussian process regression. `kriging` supports
 ordinary kriging and universal kriging (using a polynomial drift
-term), and three semivariogram models: Gaussian, spherical, and
-exponential.
+term), and several semivariogram models.
 
 In the presence of drift (a varying mean value across the data space),
 the observed semivariogram can be biased (see Starks & Fang, 1982,
-Mathematical Geology, 14, 4:
+Mathematical Geology, 14, 4;
 https://doi.org/10.1007/BF01032592). `kriging` attempts to remove this
 bias by subtracting a fitted polynomial drift term before generating
 the semivariogram.
+
+`kriging` also handles data uncertainties and covariances. If the
+data have associated errors, then the semivariogram model is derived
+from many Monte Carlo realizations of the data. The data variances and
+covariances are also factored into the kriging system of equations so that
+the interpolation variances reflect the observed data uncertainties (see,
+for example, Cecinati et al., 2018, Atmosphere, 9(11), 446; https://doi.org/10.3390/atmos9110446).
 
 ## Installation
 Install directly from this repository:
@@ -29,54 +35,87 @@ python setup.py install
 ## Usage
 ```python
 from kriging import kriging
-data_interp, var_interp = kriging.kriging(
-    coord_obs, data_obs, coord_interp, e_data_obs=None,
-    model=model, deg=deg, nbins=nbins, bin_number=bin_number,
-    plot=plot)
+krig = kriging.Kriging(obs_pos, obs_data, e_obs_data=e_obs_data, obs_data_cov=obs_data_cov)
+semivariogram_fig, corner_fig = krig.fit(
+    model=model, deg=deg, nbins=nbins, bin_number=bin_number, lag_cutoff=lag_cutoff, nsims=nsims)
+interp_data, interp_var = krig.interp(interp_pos)
 ```
 
-Arguments:
+## Functions & Arguments:
 
-* `coord_obs` is the `NxM` scalar array of `N` Cartesian positions in
+### Object initialization
+Intialize a new `Kriging` object.
+```python
+krig = kriging.Kriging(obs_pos, obs_data, e_obs_data=e_obs_data, obs_data_cov=obs_data_cov)
+```
+* `obs_pos` is the `NxM` scalar array of the `N` observed Cartesian positions in
   `M` dimensions.
-
-* `data_obs` is the `N`-length scalar array of the observed value at
+* `obs_data` is the `N`-length scalar array of observations at
   each position.
+* `e_obs_data` (optional) is the `N`-length scalar array of observed
+  value uncertainties (standard deviation). If `None` (default), then the
+  data covariance matrix can be supplied via `obs_data_cov`. If both
+  are `None`, then data uncertainies are not considered in the kriging solution.
+* `obs_data_cov` (optional) is the `NxN` scalar array of observed
+  data covariances.  If `None` (default), then the (uncorrelated)
+  data uncertainties can be supplied via `e_obs_data`. If both
+  are `None`, then data uncertainies are not considered in the kriging solution.
 
-* `coord_interp` is the `LxM` scalar array of `L` Cartesian positions
-  at which to calculate interpolated values.
-
-* `e_data_obs` (optional) is the `N`-length scalar array of observed
-  value uncertainties. This is used to weight the data when fitting
-  the polynomial drift term. If `None` (default), then use equal
-  weights.
-
+### Fitting Semivariogram Model
+Fit and remove a polynomial drift component and then fit a semivariogram model to the
+drift-subtracted data.
+```python
+semivariogram_fig, corner_fig = krig.fit(
+    model=model, deg=deg, nbins=nbins, bin_number=bin_number, lag_cutoff=lag_cutoff, nsims=nsims)
+```
 * `model` (optional) is the assumed semivariogram model. Available
-  values are `gaussian` (default), `spherical`, and `exponential`.
-
+  values can be found via: `from kriging import kriging; print(kriging._MODELS.keys())`
 * `deg` (optional) is the degree of the polynomial drift term. `deg=0`
   (default) is equivalent to ordinary kriging (no drift).
-
 * `nbins` (optional) is the number of lag bins to use when generating
   the semivariogram. The default value is `6`.
-
 * `bin_number` (optional) is a flag to set how the lag bins are
   spaced. The default value is `False`, which means that the lag bins
   have equal width covering the full range of observed lags.  If
   `True`, then each lag bin includes the same number of data.
+* `lag_cutoff` (optional) is the maximum lag used to fit the semivariogram
+  relative to the maximum separation of the observed data. The value of
+  this parameter should be between `0.0` (not inclusive) and `1.0` (inclusive,
+  default). 
+* `nsims` (optional) is the number of Monte Carlo simulations to perform
+  when fitting the semivariogram model. The default is `1000`. This
+  parameter is silently ignored if both `e_obs_data` and `obs_data_cov` are `None`.
+* `semivariogram_fig` (optional) fitted semivariogram model plot.
+  If both `e_obs_data` and `obs_data_cov` are `None`, then this plot shows the semivariogram
+  and fitted semivariogram model. Otherwise, this plot shows the Monte Carlo distribution of
+  semivariogram bin mean values as a violin plot, 100 examples of the  fitted semivariogram
+  models, and the average semivariogram model.
+* `corner_fname` (optional) is the  semivariogram model parameter corner plot.
+  This plot shows the marginalized distributions of the semivariogram model parameters
+  determined from the Monte Carlo simulations. This return value is `None` if both `e_obs_data` and
+  `obs_data_cov` are `None` (i.e., there are no Monte Carlo samples to plot).
 
-* `plot` (optional) is a filename where the semivariogram plot is
-  saved. By default (`None`), the plot is not saved.
+Here is a visual representation of the available semivariogram models, each having
+parameters `nugget = 1.0`, `sill = 1.0`, and `range = 1.0`.
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/models.png" width="45%" />
 
-Return values:
-
-* `data_interp` is the `L`-length scalar array of interpolated values at
-  each `coord_interp` position.
-
-* `var_interp` is the `L`-length scalar array of variances at each
-  `coord_interp` position.
+### Interpolation
+Solve the kriging system of equations and evaluate the interpolation and
+variance a given positions.
+```python
+interp_data, interp_var = krig.interp(interp_pos)
+```
+* `interp_pos` is the `LxM` scalar array of `L` Cartesian positions
+  at which to calculate interpolated values.
+* `interp_data` is the `L`-length scalar array of interpolated values at
+  each `interp_pos` position.
+* `interp_var` is the `L`-length scalar array of variances at each
+  `interp_pos` position.
 
 ## Example
+For more examples, see the notebooks in the example directory.
+
+### Universal Kriging
 ```python
 import numpy as np
 import matplotlib.pyplot as plt
@@ -85,39 +124,71 @@ from kriging import kriging
 # set a random seed for reproduciblity
 np.random.seed(1234)
 
+# the "true" field
+def truth(pos):
+    # pos = (N, M) array of N scalar positions in M dimensions
+    # true field is a horizontal gradient + Gaussian ring
+    horiz_gradient = 0.5
+    data = horiz_gradient * pos[:, 0]
+    radius = np.sqrt((pos**2.0).sum(axis=1))
+    ring_amp = 10.0
+    ring_rad = 8.0
+    ring_sig = 2.0
+    data += ring_amp * np.exp(-0.5 * ((radius - ring_rad)/ring_sig)**2.0)
+    return data
+
 # generate some random data
 num_data = 100
-coord_obs = np.random.uniform(-10, 10, size=(num_data, 2))
-# the mean value varies quadratically
-data_obs = 10.0 + 0.1 * coord_obs.prod(axis=1)
-# add some noise that increases radially
-e_data_obs = 0.1 + 0.1*np.sqrt((coord_obs**2.0).sum(axis=1))
-data_obs += e_data_obs * np.random.randn(num_data)
+obs_pos = np.random.uniform(-15, 15, size=(num_data, 2))
 
 # interpolation grid
-xgrid, ygrid = np.mgrid[-10:10:100j, -10:10:100j]
-coord_interp = np.vstack((xgrid.flatten(), ygrid.flatten())).T
+xgrid, ygrid = np.mgrid[-15:15:100j, -15:15:100j]
+extent = [xgrid.min(), xgrid.max(), ygrid.min(), ygrid.max()]
+grid_pos = np.vstack((xgrid.flatten(), ygrid.flatten())).T
 
-# universal kriging with linear drift term
-data_interp, var_interp = kriging.kriging(
-    coord_obs, data_obs, coord_interp, e_data_obs=e_data_obs,
-    model='gaussian', deg=1, nbins=10, bin_number=True,
-    plot='semivariogram.png')
-
-# plot data on top of interpolated grid
-fig, ax = plt.subplots()
-cax = ax.imshow(
-    data_interp.reshape(100, 100).T, origin='lower', interpolation='none',
-    extent=[-10, 10, -10, 10], vmin=0, vmax=20)
-ax.scatter(
-    coord_obs[:, 0], coord_obs[:, 1], c=data_obs, edgecolor='k',
-    vmin=0, vmax=20)
-fig.colorbar(cax)
-ax.set_aspect('equal')
-fig.savefig('example.png')
-plt.close(fig)
+# plot "truth"
+true_data = truth(grid_pos)
+plt.imshow(true_data.reshape(xgrid.shape).T, origin='lower', extent=extent, vmin=-10, vmax=15)
+plt.colorbar(label="Truth")
+plt.tight_layout()
 ```
-<img src='https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram.png' width='45%' /><img src='https://raw.githubusercontent.com/tvwenger/kriging/master/example/example.png' width='45%' />
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/truth.png" width="45%" />
+
+```python
+# randomly sample observations of the "true" field
+obs_pos = np.random.uniform(-15.0, 15.0, size=(100, 2))
+obs_data = truth(obs_pos)
+
+# add some Gaussian noise
+e_obs_data = 1.0 * np.ones(len(obs_data))
+obs_data += e_obs_data * np.random.randn(len(obs_data))
+
+# universal kriging (deg=1)
+krig = kriging.Kriging(obs_pos, obs_data, e_obs_data=e_obs_data)
+semivariogram_fig, corner_fig = krig.fit(
+    model="wave", deg=1, nbins=10, nsims=1000, bin_number=False, lag_cutoff=0.5)
+interp_data, interp_var = krig.interp(grid_pos)
+semivariogram_fig.show()
+corner_fig.show()
+```
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram.png" width="45%" />
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/corner.png" width="45%" />
+
+```python
+# plot interpolation
+plt.imshow(interp_data.reshape(xgrid.shape).T, origin='lower', extent=extent, vmin=-10.0, vmax=15.0)
+plt.scatter(obs_pos[:, 0], obs_pos[:, 1], c=obs_data, edgecolor='k', marker='o', vmin=-10.0, vmax=15.0)
+plt.colorbar(label="Interpolation")
+plt.show()
+
+# plot standard deviation
+interp_std = np.sqrt(interp_var)
+plt.imshow(interp_std.reshape(xgrid.shape).T, origin='lower', extent=extent)
+plt.colorbar(label="Standard Deviation")
+plt.show()
+```
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/mean.png" width="45%" />
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/std.png" width="45%" />
 
 ## Issues and Contributing
 

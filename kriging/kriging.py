@@ -22,234 +22,398 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 2021-02-15 Trey V. Wenger
+2021-03-14 Trey V. Wenger - v2.0
+    Proper handling of data uncertainties and covariances.
 """
 
 import numpy as np
 import itertools
-from scipy.spatial.distance import pdist, cdist, squareform
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
+import corner
+
 from . import models
 
-_VERSION = "1.2"
+_VERSION = "2.0"
 
 _MODELS = {
+    "linear": models.linear,
     "gaussian": models.gaussian,
     "exponential": models.exponential,
     "spherical": models.spherical,
+    "wave": models.wave,
+    "quadratic": models.quadratic,
+    "circular": models.circular,
 }
 
 
-def kriging(
-    coord_obs,
-    data_obs,
-    coord_interp,
-    e_data_obs=None,
-    model="gaussian",
-    deg=0,
-    nbins=6,
-    bin_number=False,
-    plot=None,
-):
-    """
-    Interpolation via N-dimensional Ordinary or Universal kriging.
+class Kriging:
+    def __init__(self, obs_pos, obs_data, e_obs_data=None, obs_data_cov=None):
+        """
+        Initialize a new Kriging object.
 
-    Inputs:
-        coord_obs :: (N, M) array of scalars
-            Cartesian coordinates of N observations in M dimensions
-        data_obs :: (N,) array of scalars
-            Observed data values
-        coord_interp :: (L, M) array of scalars
-            Cartesian coordinates at which to evaluate interpolation
-        e_data_obs :: (N,) array of scalars
-            Uncertainty of observed data values. If None, use equal
-            data weights.
-        model :: string
-            Semivariogram model. One of the keys of _MODELS.
-        deg :: integer
-            Quadratic degree of local drift. If 0, then this is equivalent
-            to ordinary kriging.
-        nbins :: integer
-            Number of lag bins
-        bin_number :: boolean
-            Define lag bins such that each bin includes the same number of data
-            points. If False, use lag bins of equal width.
-        plot :: string
-            If not None, plot semivariogram and save to this filename.
+        Inputs:
+            obs_pos :: (N, M) array of scalars
+                Cartesian coordinates of N observations in M dimensions
+            obs_data :: (N,) array of scalars
+                Observed data values
+            e_obs_data :: (N,) array of scalars
+                Uncertainty of observed data values. If None, use obs_data_cov
+                or equal data weights.
+            obs_data_cov :: (N, N) array of scalars
+                The data covariance matrix. If supplied, the value of
+                e_obs_data is ignored.
 
-    Returns: data_interp, var_interp
-        data_interp :: (L,) array of scalars
-            Interpolated data
-        var_interp :: (L,) array of scalars
-            Variance at each interpolation point
-    """
-    # Check inputs
-    if coord_obs.ndim != 2:
-        raise ValueError("Input coordinate array must be 2-D")
-    if data_obs.ndim != 1:
-        raise ValueError("Input data array must be 1-D")
-    if coord_obs.shape[0] != data_obs.shape[0]:
-        raise ValueError("Input coordinate array and data array mismatched")
-    if e_data_obs is not None and e_data_obs.shape[0] != data_obs.shape[0]:
-        raise ValueError("Input data array and e_data array mismatched")
-    if model not in _MODELS:
-        raise ValueError("Unsupported variogram model")
-
-    # equal weights for data if no errors supplied
-    if e_data_obs is None:
-        e_data_obs = np.ones(len(data_obs))
-
-    # generate polynomial basis vectors
-    def basis(size, i):
-        vector = np.zeros(size, dtype=np.int)
-        vector[i] = 1
-        return vector
-
-    num_data, num_dim = coord_obs.shape
-    polynomial_basis = [basis(num_dim + 1, i) for i in range(num_dim + 1)]
-
-    # generate design matrix
-    polynomial_powers = np.sum(
-        list(itertools.combinations_with_replacement(polynomial_basis, deg)),
-        axis=1,
-    )
-    coord_obs_pad = np.hstack(
-        (np.ones((num_data, 1), dtype=coord_obs.dtype), coord_obs)
-    )
-    design = np.hstack(
-        [
-            (coord_obs_pad ** p).prod(axis=1)[..., None]
-            for p in polynomial_powers
-        ]
-    )
-
-    # polynomial soft_l1 loss function
-    def loss(theta):
-        res = (design.dot(theta) - data_obs) / e_data_obs
-        return np.sum(2.0 * np.sqrt(1.0 + res ** 2.0) - 1.0)
-
-    # fit polynomial drift
-    num_powers = design.shape[1]
-    theta0 = np.zeros(num_powers)
-    # robust least squares
-    res = minimize(loss, theta0)
-
-    # remove polynomial drift
-    data_obs_res = data_obs - design.dot(res.x)
-
-    # evaluate pairwise distance between observations
-    dist_obs = pdist(coord_obs, "euclidean")
-
-    # evaluate pairwise squared difference between observations
-    data_diff_obs = 0.5 * pdist(data_obs_res[:, np.newaxis], "sqeuclidean")
-
-    # define lag bins
-    dist_min = np.min(dist_obs)
-    dist_max = np.max(dist_obs)
-    if bin_number:
-        # bins have equal number of points in each
-        num_points = int(len(dist_obs) / nbins)
-        dist_sorted = np.sort(dist_obs)
-        bins = [dist_sorted[n * num_points] for n in range(nbins)]
-    else:
-        # bins have fixed size
-        bin_width = (dist_max - dist_min) / nbins
-        bins = [dist_min + n * bin_width for n in range(nbins)]
-    bins.append(dist_max)
-
-    # bin data
-    bin_data = np.zeros(nbins)
-    lag_mean = np.ones(nbins) * np.nan
-    lag_std = np.ones(nbins) * np.nan
-    semivar_mean = np.ones(nbins) * np.nan
-    semivar_std = np.ones(nbins) * np.nan
-    for n in range(nbins):
-        members = (dist_obs >= bins[n]) * (dist_obs <= bins[n + 1])
-        bin_data[n] = np.sum(members)
-        if bin_data[n] > 0:
-            lag_mean[n] = np.mean(dist_obs[members])
-            lag_std[n] = np.std(dist_obs[members]) / np.sqrt(bin_data[n])
-            semivar_mean[n] = np.mean(data_diff_obs[members])
-            semivar_std[n] = np.std(data_diff_obs[members]) / np.sqrt(
-                bin_data[n]
+        Returns: Nothing
+        """
+        # Check inputs
+        if obs_pos.ndim != 2:
+            raise ValueError("Observed coordinate array must be 2-D")
+        if obs_data.ndim != 1:
+            raise ValueError("Observed data array must be 1-D")
+        if obs_pos.shape[0] != obs_data.shape[0]:
+            raise ValueError(
+                "Observed coordinate array and data array mismatched"
             )
+        if e_obs_data is not None and e_obs_data.shape[0] != obs_data.shape[0]:
+            raise ValueError("Observed data array and e_data array mismatched")
+        if obs_data_cov is not None and obs_data_cov.ndim != 2:
+            raise ValueError("Covariance matrix must have two dimensions")
+        if obs_data_cov is not None:
+            if obs_data_cov.shape[0] != obs_data_cov.shape[1]:
+                raise ValueError("Covariance matrix must be square")
+            if obs_data_cov.shape[0] != obs_data.shape[0]:
+                raise ValueError(
+                    "Covariance matrix and input data array mismatched"
+                )
 
-    # remove empty/nan bins
-    bad = np.isnan(semivar_mean)
-    lag_mean = lag_mean[~bad]
-    lag_std = lag_std[~bad]
-    semivar_mean = semivar_mean[~bad]
-    semivar_std = semivar_std[~bad]
+        self.obs_pos = obs_pos
+        self.obs_data = obs_data
+        self.num_data, self.num_dim = self.obs_pos.shape
 
-    # fit semivariogram model to binned data
-    semivariogram = _MODELS[model]
+        # build covariance matrix
+        self.has_obs_errors = False
+        if obs_data_cov is None:
+            # equal weights for data if no errors supplied
+            self.obs_data_cov = np.eye(len(obs_data))
+            if e_obs_data is not None:
+                self.obs_data_cov = self.obs_data_cov * e_obs_data ** 2.0
+                self.has_obs_errors = True
+        else:
+            self.obs_data_cov = obs_data_cov
+            self.has_obs_errors = True
 
-    # semivariogram soft_l1 loss function
-    def loss(theta):
-        res = (semivariogram(theta, lag_mean) - semivar_mean) / semivar_std
-        return np.sum(2.0 * np.sqrt(1.0 + res ** 2.0) - 1.0)
-
-    p0 = [
-        np.max(semivar_mean) - np.min(semivar_mean),
-        np.median(lag_mean),
-        semivar_mean[0],
-    ]
-    bounds = [
-        (0.0, np.inf),
-        (np.min(lag_mean), np.max(lag_mean)),
-        (0.0, np.inf),
-    ]
-    # robust least squares
-    res = minimize(loss, p0, bounds=bounds, method="L-BFGS-B")
-
-    # plot fitted semivariogram
-    if plot is not None:
-        xfit = np.linspace(0.0, 1.1 * lag_mean[-1], 100)
-        yfit = semivariogram(res.x, xfit)
-        fig, ax = plt.subplots()
-        ax.errorbar(
-            lag_mean,
-            semivar_mean,
-            yerr=semivar_std,
-            fmt="o",
-            color="k",
-            linestyle="none",
+        # pairwise distance between each observation
+        self.upper = np.triu_indices(len(self.obs_data), k=1)
+        self.obs_distance_full = np.sqrt(
+            np.sum(
+                (self.obs_pos - self.obs_pos[:, np.newaxis]) ** 2.0, axis=-1
+            )
         )
-        ax.plot(xfit, yfit, "r-")
+        self.obs_distance_pairs = self.obs_distance_full[self.upper]
+
+        # attributes filled by fit function
+        self.poly_coeff = None
+        self.polynomial_powers = None
+        self.polynomial_design = None
+        self.num_powers = None
+        self.model_params_pt = None
+
+    def fit(
+        self,
+        model="gaussian",
+        deg=0,
+        nbins=6,
+        bin_number=False,
+        lag_cutoff=1.0,
+        nsims=1000,
+    ):
+        """
+        Fit a polynomial drift and semivariogram model to the observed data.
+
+        Inputs:
+            model :: string
+                Semivariogram model. One of the keys of _MODELS.
+            deg :: integer
+                Quadratic degree of local drift. If 0, then this is equivalent
+                to ordinary kriging.
+            nbins :: integer
+                Number of lag bins
+            bin_number :: boolean
+                Define lag bins such that each bin includes the same number of
+                data points. If False, use lag bins of equal width.
+            lag_cutoff :: scalar between 0.0 and 1.0
+                Ignore points separated by more than this fraction of the
+                maximum lag when plotting and fitting the semivariogram.
+            nsims :: integer
+                Number of Monte Carlo semivariogram model fitting simulations.
+                If there are no observed data errors (i.e. if e_obs_data and
+                obs_data_cov are None), then only one simulation is performed.
+
+        Returns: semivariogram_fig, corner_fig
+            semivariogram_fig :: matplotlib.pyplot.Figure
+                The semivariogram plot
+            corner_fig :: matplotlib.pyplot.Figure
+                The semivariogram model parameter corner plot if
+                either e_obs_data or obs_data_cov is not None,
+                otherwise None
+        """
+        # check inputs
+        if deg < 0:
+            raise ValueError("deg must be >= 0")
+        if nbins < 3:
+            raise ValueError("nbins must be >= 3")
+        if lag_cutoff <= 0.0 or lag_cutoff > 1.0:
+            raise ValueError("lag_cutoff must be in (0.0, 1.0]")
+
+        # generate polynomial basis vectors
+        def basis(size, i):
+            vector = np.zeros(size, dtype=np.int)
+            vector[i] = 1
+            return vector
+
+        polynomial_basis = [
+            basis(self.num_dim + 1, i) for i in range(self.num_dim + 1)
+        ]
+
+        # generate polynomial design matrix
+        self.polynomial_powers = np.sum(
+            list(
+                itertools.combinations_with_replacement(polynomial_basis, deg)
+            ),
+            axis=1,
+        )
+        obs_pos_pad = np.hstack(
+            (
+                np.ones((self.num_data, 1), dtype=self.obs_pos.dtype),
+                self.obs_pos,
+            )
+        )
+        self.polynomial_design = np.hstack(
+            [
+                (obs_pos_pad ** p).prod(axis=1)[..., None]
+                for p in self.polynomial_powers
+            ]
+        )
+        self.num_powers = self.polynomial_design.shape[1]
+
+        # polynomial coefficients via generalized least squares
+        cov_dot_design = np.linalg.solve(
+            self.obs_data_cov, self.polynomial_design
+        )
+        cov_dot_data = np.linalg.solve(self.obs_data_cov, self.obs_data)
+        self.poly_coeff = np.linalg.solve(
+            self.polynomial_design.T.dot(cov_dot_design),
+            self.polynomial_design.T.dot(cov_dot_data),
+        )
+
+        # remove polynomial drift
+        obs_data_res = self.obs_data - self.polynomial_design.dot(
+            self.poly_coeff
+        )
+
+        # define lag bin edges
+        dist_min = np.min(self.obs_distance_pairs)
+        dist_max = lag_cutoff * np.max(self.obs_distance_pairs)
+        if bin_number:
+            # bins have equal number of points in each
+            num_good_points = int(np.sum(self.obs_distance_pairs <= dist_max))
+            num_bin_points = int(num_good_points / nbins)
+            obs_distance_pairs_sorted = np.sort(self.obs_distance_pairs)
+            bin_edges = [
+                obs_distance_pairs_sorted[n * num_bin_points]
+                for n in range(nbins)
+            ]
+        else:
+            # bins have fixed size
+            bin_width = (dist_max - dist_min) / nbins
+            bin_edges = [dist_min + n * bin_width for n in range(nbins)]
+        bin_edges.append(dist_max)
+
+        # assign data pairs to bins
+        lag_mean = np.zeros(nbins)
+        bin_members = []
+        for n in range(nbins):
+            idx = np.where(
+                (self.obs_distance_pairs >= bin_edges[n])
+                & (self.obs_distance_pairs <= bin_edges[n + 1])
+            )[0]
+            lag_mean[n] = np.mean(self.obs_distance_pairs[idx])
+            bin_members.append(idx)
+
+        # semivariogram model
+        self.semivariogram = _MODELS[model]
+
+        # semivariogram soft_l1 loss function
+        def loss(theta, lag_mean, semivar):
+            res = self.semivariogram(theta, lag_mean) - semivar
+            return np.sum(2.0 * np.sqrt(1.0 + res ** 2.0) - 1.0)
+
+        # semivariogram model parameter bounds
+        bounds = [
+            (0.0, np.inf),
+            (self.obs_distance_pairs.min(), np.inf),
+            (0.0, np.inf),
+        ]
+
+        # semivariogram model parameter estimates
+        p0 = [0.0, np.median(lag_mean), 0.0]
+
+        # Monte Carlo model parameters if supplied data errors
+        resample = True
+        if not self.has_obs_errors:
+            nsims = 1
+            resample = False
+        model_params = np.zeros((nsims, 3))
+        chol_cov = np.linalg.cholesky(self.obs_data_cov)
+        semivars = np.zeros((nsims, nbins))
+
+        for i in range(nsims):
+            # resample data
+            if resample:
+                data_samples = obs_data_res + chol_cov.dot(
+                    np.random.standard_normal(len(obs_data_res))
+                )
+            else:
+                data_samples = obs_data_res
+
+            # pairwise squared difference
+            data_diff2 = (data_samples - data_samples[:, np.newaxis]) ** 2.0
+            data_diff2 = data_diff2[self.upper]
+
+            # compute semivariance
+            for n in range(nbins):
+                semivars[i, n] = 0.5 * np.mean(data_diff2[bin_members[n]])
+
+            # fit semivariogram model with robust least squares
+            p0[0] = semivars[i].max() - semivars[i].min()
+            p0[2] = semivars[i][0]
+            res = minimize(
+                loss,
+                p0,
+                args=(lag_mean, semivars[i]),
+                bounds=bounds,
+                method="L-BFGS-B",
+            )
+            model_params[i] = res.x
+
+        # median of fit parameter samples to get point estimate
+        self.model_params_pt = np.median(model_params, axis=0)
+
+        # plot fitted semivariogram and parameter correlations
+        if resample:
+            # generate corner plot
+            corner_fig = corner.corner(
+                model_params,
+                labels=["Sill", "Range", "Nugget"],
+                truths=self.model_params_pt,
+            )
+        else:
+            corner_fig = None
+
+        # plot fitted semivariogram
+        xfit = np.linspace(0.0, 1.1 * lag_mean[-1], 100)
+        yfit = self.semivariogram(self.model_params_pt, xfit)
+        semivariogram_fig, ax = plt.subplots()
+        if resample:
+            # plot ~100 semivariogram fits
+            step = int(np.ceil(nsims / 100))
+            for params in model_params[::step]:
+                ax.plot(
+                    xfit,
+                    self.semivariogram(params, xfit),
+                    "r-",
+                    linewidth=0.1,
+                    alpha=0.8,
+                )
+            parts = ax.violinplot(
+                semivars, positions=lag_mean, widths=1.0, showmedians=True
+            )
+            for pc in parts["bodies"]:
+                pc.set_facecolor("k")
+                pc.set_edgecolor("k")
+            for key in ["cmaxes", "cmins", "cbars", "cmedians"]:
+                parts[key].set_edgecolor("k")
+        else:
+            ax.plot(lag_mean, semivars[0], "ko")
+        ax.plot(xfit, yfit, "r-", linewidth=2.0)
         ax.set_xlabel("Lag")
         ax.set_ylabel("Semivariance")
-        fig.tight_layout()
-        fig.savefig(plot, bbox_inches="tight")
-        plt.close(fig)
+        semivariogram_fig.tight_layout()
 
-    # Generate the kriging matrix
-    dist_mat = squareform(dist_obs)
-    krig_mat = np.zeros((num_data + num_powers, num_data + num_powers))
-    krig_mat[:num_data, :num_data] = semivariogram(res.x, dist_mat)
-    krig_mat[num_data:, :num_data] = design.T
-    krig_mat[:num_data, num_data:] = design
-    np.fill_diagonal(krig_mat, 0.0)
+        # build kriging system of equations matrix
+        self.krig_mat = np.zeros(
+            (self.num_data + self.num_powers, self.num_data + self.num_powers)
+        )
+        self.krig_mat[: self.num_data, : self.num_data] = self.semivariogram(
+            self.model_params_pt, self.obs_distance_full
+        )
+        self.krig_mat[
+            self.num_data :, : self.num_data
+        ] = self.polynomial_design.T
+        self.krig_mat[
+            : self.num_data, self.num_data :
+        ] = self.polynomial_design
+        np.fill_diagonal(self.krig_mat, 0.0)
+        if self.has_obs_errors:
+            self.krig_mat[: self.num_data, : self.num_data] -= (
+                0.5 * self.obs_data_cov
+            )
+        return semivariogram_fig, corner_fig
 
-    # Evaluate distance between each observation point and
-    # each interpolation point, evaluate variogram
-    num_interp = coord_interp.shape[0]
-    interp_dist_mat = cdist(coord_interp, coord_obs, "euclidean")
-    interp_variogram = np.zeros((num_interp, num_data + num_powers))
-    interp_variogram[:, :num_data] = semivariogram(res.x, interp_dist_mat)
-    coord_interp_pad = np.hstack(
-        (np.ones((num_interp, 1), dtype=coord_interp.dtype), coord_interp)
-    )
-    interp_polynomial = np.hstack(
-        [
-            (coord_interp_pad ** p).prod(axis=1)[..., None]
-            for p in polynomial_powers
-        ]
-    )
-    interp_variogram[:, num_data:] = interp_polynomial
+    def interp(self, interp_pos):
+        """
+        Solve kriging system and evaluate interpolation and variance.
 
-    # Solve kriging system of equations
-    solution = np.linalg.solve(krig_mat, interp_variogram.T).T
-    data_interp = np.sum(solution[:, :num_data] * data_obs, axis=1)
-    var_interp = np.sum(solution * interp_variogram, axis=1)
+        Inputs:
+            interp_pos :: (L, M) array of scalars
+                Cartesian coordinates at which to evaluate interpolation
 
-    return data_interp, var_interp
+        Returns: interp_data, interp_var
+            interp_data :: (L,) array of scalars
+                Interpolated at each interpolation point
+            interp_var :: (L,) array of scalars
+                Variance at each interpolation point
+        """
+        # check inputs
+        if interp_pos.shape[1] != self.num_dim:
+            raise ValueError(
+                "Interpolation coordinates have incorrect dimensions"
+            )
+        if self.krig_mat is None:
+            raise ValueError("Run fit function first")
+        num_interp = interp_pos.shape[0]
+
+        # distance between each interpolation position and each
+        # observation position
+        interp_distance = np.sqrt(
+            np.sum((interp_pos - self.obs_pos[:, np.newaxis]) ** 2.0, axis=-1)
+        ).T
+
+        # build interpolation matrix
+        interp_mat = np.zeros((num_interp, self.num_data + self.num_powers))
+        # evaluate variogram at each separation
+        interp_mat[:, : self.num_data] = self.semivariogram(
+            self.model_params_pt, interp_distance
+        )
+        # if self.has_obs_errors:
+        #    interp_mat[:, : self.num_data] -= 0.5 * np.diag(self.obs_data_cov)
+        # evaluate polynomial basis at each separation
+        interp_pos_pad = np.hstack(
+            (np.ones((num_interp, 1), dtype=interp_pos.dtype), interp_pos)
+        )
+        interp_polynomial_design = np.hstack(
+            [
+                (interp_pos_pad ** p).prod(axis=1)[..., None]
+                for p in self.polynomial_powers
+            ]
+        )
+        interp_mat[:, self.num_data :] = interp_polynomial_design
+
+        # Solve kriging system of equations
+        solution = np.linalg.solve(self.krig_mat, interp_mat.T).T
+        data_interp = np.sum(
+            solution[:, : self.num_data] * self.obs_data, axis=1
+        )
+        var_interp = np.sum(solution * interp_mat, axis=1)
+        return data_interp, var_interp
