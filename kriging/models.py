@@ -22,22 +22,28 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 2021-02-15 Trey V. Wenger
+2021-03-20 Trey V. Wenger - added linear, wave, quadratic, circular models
 """
 
 import numpy as np
 
 
+def linear(theta, x):
+    sill, range, nugget = theta
+    ret = np.ones(x.shape, dtype=x.dtype) * (sill + nugget)
+    c = x < range
+    ret[c] = nugget + sill / range * x[c]
+    return ret
+
+
 def gaussian(theta, x):
     sill, range, nugget = theta
-    return (
-        sill * (1.0 - np.exp(-(x ** 2.0) / (range * 4.0 / 7.0) ** 2.0))
-        + nugget
-    )
+    return sill * (1.0 - np.exp(-5.0 * ((x / range) ** 2.0))) + nugget
 
 
 def exponential(theta, x):
     sill, range, nugget = theta
-    return sill * (1.0 - np.exp(-x / (range / 3.0))) + nugget
+    return sill * (1.0 - np.exp(-3.0 * x / range)) + nugget
 
 
 def spherical(theta, x):
@@ -47,6 +53,44 @@ def spherical(theta, x):
     ret[c] = (
         sill
         * ((3.0 * x[c]) / (2.0 * range) - (x[c] ** 3.0) / (2.0 * range ** 3.0))
+        + nugget
+    )
+    return ret
+
+
+def wave(theta, x):
+    sill, range, nugget = theta
+    ret = np.ones(x.shape, dtype=x.dtype) * nugget
+    c = x > 0.0
+    ret[c] = (
+        sill * (1.0 - np.sin(3.0 * x[c] / range) / (3.0 * x[c] / range))
+        + nugget
+    )
+    return ret
+
+
+def quadratic(theta, x):
+    sill, range, nugget = theta
+    return (
+        sill * ((3.0 * x / range) ** 2.0 / (1.0 + (3.0 * x / range) ** 2.0))
+        + nugget
+    )
+
+
+def circular(theta, x):
+    sill, range, nugget = theta
+    ret = np.ones(x.shape, dtype=x.dtype) * (sill + nugget)
+    c = x < range
+    ret[c] = (
+        sill
+        * (
+            1.0
+            - 2.0 / np.pi * np.arccos(x[c] / range)
+            + 2.0
+            * x[c]
+            / (np.pi * range)
+            * np.sqrt(1.0 - (x[c] / range) ** 2.0)
+        )
         + nugget
     )
     return ret

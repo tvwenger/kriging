@@ -37,9 +37,13 @@ from . import models
 _VERSION = "2.0"
 
 _MODELS = {
+    "linear": models.linear,
     "gaussian": models.gaussian,
     "exponential": models.exponential,
     "spherical": models.spherical,
+    "wave": models.wave,
+    "quadratic": models.quadratic,
+    "circular": models.circular,
 }
 
 
@@ -96,6 +100,7 @@ class Kriging:
                 self.obs_data_cov = self.obs_data_cov * e_obs_data ** 2.0
                 self.has_obs_errors = True
         else:
+            self.obs_data_cov = obs_data_cov
             self.has_obs_errors = True
 
         # pairwise distance between each observation
@@ -108,6 +113,7 @@ class Kriging:
         self.obs_distance_pairs = self.obs_distance_full[self.upper]
 
         # attributes filled by fit function
+        self.poly_coeff = None
         self.polynomial_powers = None
         self.polynomial_design = None
         self.num_powers = None
@@ -119,6 +125,7 @@ class Kriging:
         deg=0,
         nbins=6,
         bin_number=False,
+        lag_cutoff=1.0,
         nsims=1000,
     ):
         """
@@ -135,6 +142,9 @@ class Kriging:
             bin_number :: boolean
                 Define lag bins such that each bin includes the same number of
                 data points. If False, use lag bins of equal width.
+            lag_cutoff :: scalar between 0.0 and 1.0
+                Ignore points separated by more than this fraction of the
+                maximum lag when plotting and fitting the semivariogram.
             nsims :: integer
                 Number of Monte Carlo semivariogram model fitting simulations.
                 If there are no observed data errors (i.e. if e_obs_data and
@@ -148,6 +158,14 @@ class Kriging:
                 either e_obs_data or obs_data_cov is not None,
                 otherwise None
         """
+        # check inputs
+        if deg < 0:
+            raise ValueError("deg must be >= 0")
+        if nbins < 3:
+            raise ValueError("nbins must be >= 3")
+        if lag_cutoff <= 0.0 or lag_cutoff > 1.0:
+            raise ValueError("lag_cutoff must be in (0.0, 1.0]")
+
         # generate polynomial basis vectors
         def basis(size, i):
             vector = np.zeros(size, dtype=np.int)
@@ -184,23 +202,27 @@ class Kriging:
             self.obs_data_cov, self.polynomial_design
         )
         cov_dot_data = np.linalg.solve(self.obs_data_cov, self.obs_data)
-        poly_coeff = np.linalg.solve(
+        self.poly_coeff = np.linalg.solve(
             self.polynomial_design.T.dot(cov_dot_design),
             self.polynomial_design.T.dot(cov_dot_data),
         )
 
         # remove polynomial drift
-        obs_data_res = self.obs_data - self.polynomial_design.dot(poly_coeff)
+        obs_data_res = self.obs_data - self.polynomial_design.dot(
+            self.poly_coeff
+        )
 
         # define lag bin edges
         dist_min = np.min(self.obs_distance_pairs)
-        dist_max = np.max(self.obs_distance_pairs)
+        dist_max = lag_cutoff * np.max(self.obs_distance_pairs)
         if bin_number:
             # bins have equal number of points in each
-            num_points = int(len(self.obs_distance_pairs) / nbins)
+            num_good_points = int(np.sum(self.obs_distance_pairs <= dist_max))
+            num_bin_points = int(num_good_points / nbins)
             obs_distance_pairs_sorted = np.sort(self.obs_distance_pairs)
             bin_edges = [
-                obs_distance_pairs_sorted[n * num_points] for n in range(nbins)
+                obs_distance_pairs_sorted[n * num_bin_points]
+                for n in range(nbins)
             ]
         else:
             # bins have fixed size
@@ -228,7 +250,11 @@ class Kriging:
             return np.sum(2.0 * np.sqrt(1.0 + res ** 2.0) - 1.0)
 
         # semivariogram model parameter bounds
-        bounds = [(0.0, np.inf), (0.0, np.inf), (0.0, np.inf)]
+        bounds = [
+            (0.0, np.inf),
+            (self.obs_distance_pairs.min(), np.inf),
+            (0.0, np.inf),
+        ]
 
         # semivariogram model parameter estimates
         p0 = [0.0, np.median(lag_mean), 0.0]
@@ -257,7 +283,7 @@ class Kriging:
 
             # compute semivariance
             for n in range(nbins):
-                semivars[i, n] = np.mean(0.5 * data_diff2[bin_members[n]])
+                semivars[i, n] = 0.5 * np.mean(data_diff2[bin_members[n]])
 
             # fit semivariogram model with robust least squares
             p0[0] = semivars[i].max() - semivars[i].min()
@@ -271,8 +297,8 @@ class Kriging:
             )
             model_params[i] = res.x
 
-        # average fit parameter samples to get point estimate
-        self.model_params_pt = np.mean(model_params, axis=0)
+        # median of fit parameter samples to get point estimate
+        self.model_params_pt = np.median(model_params, axis=0)
 
         # plot fitted semivariogram and parameter correlations
         if resample:
@@ -288,22 +314,29 @@ class Kriging:
         # plot fitted semivariogram
         xfit = np.linspace(0.0, 1.1 * lag_mean[-1], 100)
         yfit = self.semivariogram(self.model_params_pt, xfit)
-        yfits = np.array(
-            [self.semivariogram(params, xfit) for params in model_params]
-        )
-        yfits_lower = np.min(yfits, axis=0)
-        yfits_upper = np.max(yfits, axis=0)
         semivariogram_fig, ax = plt.subplots()
         if resample:
-            ax.violinplot(
-                semivars, positions=lag_mean, widths=1.0, showmeans=True
+            # plot ~100 semivariogram fits
+            step = int(np.ceil(nsims / 100))
+            for params in model_params[::step]:
+                ax.plot(
+                    xfit,
+                    self.semivariogram(params, xfit),
+                    "r-",
+                    linewidth=0.1,
+                    alpha=0.8,
+                )
+            parts = ax.violinplot(
+                semivars, positions=lag_mean, widths=1.0, showmedians=True
             )
-            ax.fill_between(
-                xfit, yfits_lower, yfits_upper, color="r", alpha=0.2
-            )
+            for pc in parts["bodies"]:
+                pc.set_facecolor("k")
+                pc.set_edgecolor("k")
+            for key in ["cmaxes", "cmins", "cbars", "cmedians"]:
+                parts[key].set_edgecolor("k")
         else:
             ax.plot(lag_mean, semivars[0], "ko")
-        ax.plot(xfit, yfit, "r-")
+        ax.plot(xfit, yfit, "r-", linewidth=2.0)
         ax.set_xlabel("Lag")
         ax.set_ylabel("Semivariance")
         semivariogram_fig.tight_layout()
@@ -315,19 +348,17 @@ class Kriging:
         self.krig_mat[: self.num_data, : self.num_data] = self.semivariogram(
             self.model_params_pt, self.obs_distance_full
         )
-        if self.has_obs_errors:
-            self.krig_mat[
-                : self.num_data, : self.num_data
-            ] += self.obs_data_cov
         self.krig_mat[
             self.num_data :, : self.num_data
         ] = self.polynomial_design.T
         self.krig_mat[
             : self.num_data, self.num_data :
         ] = self.polynomial_design
-        if not self.has_obs_errors:
-            np.fill_diagonal(self.krig_mat, 0.0)
-
+        np.fill_diagonal(self.krig_mat, 0.0)
+        if self.has_obs_errors:
+            self.krig_mat[: self.num_data, : self.num_data] -= (
+                0.5 * self.obs_data_cov
+            )
         return semivariogram_fig, corner_fig
 
     def interp(self, interp_pos):
@@ -365,8 +396,8 @@ class Kriging:
         interp_mat[:, : self.num_data] = self.semivariogram(
             self.model_params_pt, interp_distance
         )
-        if self.has_obs_errors:
-            interp_mat[:, : self.num_data] += np.diag(self.obs_data_cov)
+        # if self.has_obs_errors:
+        #    interp_mat[:, : self.num_data] -= 0.5 * np.diag(self.obs_data_cov)
         # evaluate polynomial basis at each separation
         interp_pos_pad = np.hstack(
             (np.ones((num_interp, 1), dtype=interp_pos.dtype), interp_pos)
@@ -385,6 +416,4 @@ class Kriging:
             solution[:, : self.num_data] * self.obs_data, axis=1
         )
         var_interp = np.sum(solution * interp_mat, axis=1)
-        # catch small negative variances
-        var_interp[var_interp < 0.0] = 0.0
         return data_interp, var_interp
