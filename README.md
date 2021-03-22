@@ -5,8 +5,7 @@
 [kriging](https://en.wikipedia.org/wiki/Kriging), a method of
 interpolation using Gaussian process regression. `kriging` supports
 ordinary kriging and universal kriging (using a polynomial drift
-term), and three semivariogram models: Gaussian, spherical, and
-exponential.
+term), and several semivariogram models.
 
 In the presence of drift (a varying mean value across the data space),
 the observed semivariogram can be biased (see Starks & Fang, 1982,
@@ -37,8 +36,8 @@ python setup.py install
 ```python
 from kriging import kriging
 krig = kriging.Kriging(obs_pos, obs_data, e_obs_data=e_obs_data, obs_data_cov=obs_data_cov)
-krig.fit(model=model, deg=deg, nbins=nbins, bin_number=bin_number, nsims=nsims,
-         corner_fname=corner_fname, semivariogram_fname=semivariogram_fname)
+semivariogram_fig, corner_fig = krig.fit(
+    model=model, deg=deg, nbins=nbins, bin_number=bin_number, lag_cutoff=lag_cutoff, nsims=nsims)
 interp_data, interp_var = krig.interp(interp_pos)
 ```
 
@@ -66,11 +65,11 @@ krig = kriging.Kriging(obs_pos, obs_data, e_obs_data=e_obs_data, obs_data_cov=ob
 Fit and remove a polynomial drift component and then fit a semivariogram model to the
 drift-subtracted data.
 ```python
-krig.fit(model=model, deg=deg, nbins=nbins, bin_number=bin_number, nsims=nsims,
-         corner_fname=corner_fname, semivariogram_fname=semivariogram_fname)
+semivariogram_fig, corner_fig = krig.fit(
+    model=model, deg=deg, nbins=nbins, bin_number=bin_number, lag_cutoff=lag_cutoff, nsims=nsims)
 ```
 * `model` (optional) is the assumed semivariogram model. Available
-  values are `gaussian` (default), `spherical`, and `exponential`.
+  values can be found via: `from kriging import kriging; print(kriging._MODELS.keys())`
 * `deg` (optional) is the degree of the polynomial drift term. `deg=0`
   (default) is equivalent to ordinary kriging (no drift).
 * `nbins` (optional) is the number of lag bins to use when generating
@@ -79,21 +78,26 @@ krig.fit(model=model, deg=deg, nbins=nbins, bin_number=bin_number, nsims=nsims,
   spaced. The default value is `False`, which means that the lag bins
   have equal width covering the full range of observed lags.  If
   `True`, then each lag bin includes the same number of data.
+* `lag_cutoff` (optional) is the maximum lag used to fit the semivariogram
+  relative to the maximum separation of the observed data. The value of
+  this parameter should be between `0.0` (not inclusive) and `1.0` (inclusive,
+  default). 
 * `nsims` (optional) is the number of Monte Carlo simulations to perform
   when fitting the semivariogram model. The default is `1000`. This
   parameter is silently ignored if both `e_obs_data` and `obs_data_cov` are `None`.
-* `corner_fname` (optional) is the filename (including extension) for the
-  semivariogram model parameter corner plot. If `None`, then no figure is created.
-  This plot shows the marginalized distributions of the semivariogram model parameters
-  determined from the Monte Carlo simulations. The default is `None`, which will not produce
-  a figure. This parameter is silently ignored if both `e_obs_data` and
-  `obs_data_cov` are `None`.
-* `semivariogram_fname` (optional) is the filename (including extension) for the
-  fitted semivariogram model plot. If `None`, then no figure is created. 
+* `semivariogram_fig` (optional) fitted semivariogram model plot.
   If both `e_obs_data` and `obs_data_cov` are `None`, then this plot shows the semivariogram
   and fitted semivariogram model. Otherwise, this plot shows the Monte Carlo distribution of
-  semivariogram bin mean values as a violin plot, the range of all fitted semivariogram
+  semivariogram bin mean values as a violin plot, 100 examples of the  fitted semivariogram
   models, and the average semivariogram model.
+* `corner_fname` (optional) is the  semivariogram model parameter corner plot.
+  This plot shows the marginalized distributions of the semivariogram model parameters
+  determined from the Monte Carlo simulations. This return value is `None` if both `e_obs_data` and
+  `obs_data_cov` are `None` (i.e., there are no Monte Carlo samples to plot).
+
+Here is a visual representation of the available semivariogram models, each having
+parameters `nugget = 1.0`, `sill = 1.0`, and `range = 1.0`.
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/models.png" width="45%" />
 
 ### Interpolation
 Solve the kriging system of equations and evaluate the interpolation and
@@ -108,8 +112,10 @@ interp_data, interp_var = krig.interp(interp_pos)
 * `interp_var` is the `L`-length scalar array of variances at each
   `interp_pos` position.
 
-## Examples
-### Ordinary Kriging
+## Example
+For more examples, see the notebooks in the example directory.
+
+### Universal Kriging
 ```python
 import numpy as np
 import matplotlib.pyplot as plt
@@ -118,114 +124,69 @@ from kriging import kriging
 # set a random seed for reproduciblity
 np.random.seed(1234)
 
+# the "true" field
+def truth(pos):
+    # pos = (N, M) array of N scalar positions in M dimensions
+    # true field is a horizontal gradient + Gaussian ring
+    horiz_gradient = 0.5
+    data = horiz_gradient * pos[:, 0]
+    radius = np.sqrt((pos**2.0).sum(axis=1))
+    ring_amp = 10.0
+    ring_rad = 8.0
+    ring_sig = 2.0
+    data += ring_amp * np.exp(-0.5 * ((radius - ring_rad)/ring_sig)**2.0)
+    return data
+
 # generate some random data
 num_data = 100
-obs_pos = np.random.uniform(-10, 10, size=(num_data, 2))
-# the mean value varies quadratically
-obs_data = 10.0 + 0.1 * obs_pos.prod(axis=1)
-
-# plot function
-def plot(data, fname, color=None, vmin=None, vmax=None, label=None):
-    fig, ax = plt.subplots()
-    cax = ax.imshow(
-        data.reshape(120, 120).T, origin="lower", interpolation="none",
-        extent=[-12, 12, -12, 12], vmin=vmin, vmax=vmax)
-    ax.scatter(
-        obs_pos[:, 0], obs_pos[:, 1], c=color, edgecolor="k",
-        vmin=vmin, vmax=vmax)
-    fig.colorbar(cax, label=label)
-    ax.set_aspect("equal")
-    fig.savefig(fname)
-    plt.close(fig)
+obs_pos = np.random.uniform(-15, 15, size=(num_data, 2))
 
 # interpolation grid
-xgrid, ygrid = np.mgrid[-12:12:120j, -12:12:120j]
-interp_pos = np.vstack((xgrid.flatten(), ygrid.flatten())).T
+xgrid, ygrid = np.mgrid[-15:15:100j, -15:15:100j]
+extent = [xgrid.min(), xgrid.max(), ygrid.min(), ygrid.max()]
+grid_pos = np.vstack((xgrid.flatten(), ygrid.flatten())).T
 
-# evaluate "true" field, plot
-true_data = 10.0 + 0.1 * interp_pos.prod(axis=1)
-plot(true_data, "example/truth.png", color='k',
-     vmin=0.0, vmax=25.0, label="Truth")
+# plot "truth"
+true_data = truth(grid_pos)
+plt.imshow(true_data.reshape(xgrid.shape).T, origin='lower', extent=extent, vmin=-10, vmax=15)
+plt.colorbar(label="Truth")
+plt.tight_layout()
 ```
 <img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/truth.png" width="45%" />
 ```python
-# ordinary kriging
-krig = kriging.Kriging(obs_pos, obs_data)
-krig.fit(model="gaussian", nbins=10, bin_number=True,
-         semivariogram_fname="example/semivariogram_ordinary.png")
-interp_data, interp_var = krig.interp(interp_pos)
+# randomly sample observations of the "true" field
+obs_pos = np.random.uniform(-15.0, 15.0, size=(100, 2))
+obs_data = truth(obs_pos)
 
-# plot data on top of interpolated grid
-plot(interp_data, "example/interp_ordinary.png", color=obs_data,
-     vmin=0.0, vmax=25.0, label="Interpolation")
-plot(np.sqrt(interp_var), "example/std_ordinary.png", color='k',
-     vmin=None, vmax=None, label="Standard Deviation")
+# add some Gaussian noise
+e_obs_data = 1.0 * np.ones(len(obs_data))
+obs_data += e_obs_data * np.random.randn(len(obs_data))
 
-# plot difference between interpolated and true grid
-plot(true_data - interp_data, "example/diff_ordinary.png", color='k',
-     vmin=-0.2, vmax=0.2, label="Truth $-$ Interp")
-```
-<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram_ordinary.png" width="45%" /><img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/interp_ordinary.png" width="45%" />
-<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/std_ordinary.png" width="45%" /><img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/diff_ordinary.png" width="45%" />
-
-### Ordinary Kriging with Constant Noise
-```python
-# add constant random noise
-e_obs_data = 0.1 * np.ones(len(obs_data))
-obs_noisy_data = obs_data + e_obs_data * np.random.randn(len(obs_data))
-
-# ordinary kriging
-krig = kriging.Kriging(obs_pos, obs_noisy_data, e_obs_data=e_obs_data)
-krig.fit(model="gaussian", deg=1, nbins=10, bin_number=True, nsims=10000,
-         corner_fname="example/corner_ordinary_noise.png",
-         semivariogram_fname="example/semivariogram_ordinary_noise.png")
-interp_data, interp_var = krig.interp(interp_pos)
-
-# plot data on top of interpolated grid
-plot(interp_data, "example/interp_ordinary_noise.png", color=obs_noisy_data,
-     vmin=0.0, vmax=25.0, label="Interpolation")
-plot(np.sqrt(interp_var), "example/std_ordinary_noise.png", color='k',
-     vmin=None, vmax=None, label="Standard Deviation")
-
-# plot difference between interpolated and true grid
-plot(true_data - interp_data, "example/diff_ordinary_noise.png", color='k',
-     vmin=None, vmax=None, label="Truth $-$ Interp")
-```
-<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/corner_ordinary_noise.png" width="45%" />
-<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram_ordinary_noise.png" width="45%" /><img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/interp_ordinary_noise.png" width="45%" />
-<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/std_ordinary_noise.png" width="45%" /><img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/diff_ordinary_noise.png" width="45%" />
-```python
-# universal kriging with linear drift, accounting for error
+# universal kriging (deg=1)
 krig = kriging.Kriging(obs_pos, obs_data, e_obs_data=e_obs_data)
-krig.fit(model="gaussian", deg=1, nbins=10, bin_number=True, nsims=10000,
-         corner_fname="example/corner_universal_noise.png",
-         semivariogram_fname="example/semivariogram_universal_noise.png")
-interp_data, interp_var = krig.interp(interp_pos)
-
-# plot data on top of interpolated grid
-plot(interp_data, "example/interp_universal_noise.png", color=obs_data,
-     vmin=0.0, vmax=25.0, label="Interpolation")
-plot(np.sqrt(interp_var), "example/std_universal_noise.png", color='k',
-     vmin=None, vmax=None, label="Standard Deviation")
-
-# plot difference between interpolated and true grid
-plot(true_data - interp_data, "example/diff_universal_noise.png", color='k',
-     vmin=None, vmax=None, label="Truth $-$ Interp")
-
-# add some noise that increases radially
-e_obs_data += 0.1*np.sqrt((obs_pos**2.0).sum(axis=1))
-obs_data += e_obs_data * np.random.randn(num_data)
+semivariogram_fig, corner_fig = krig.fit(
+    model="wave", deg=1, nbins=10, nsims=1000, bin_number=False, lag_cutoff=0.5)
+interp_data, interp_var = krig.interp(grid_pos)
+semivariogram_fig.show()
+corner_fig.show()
 ```
-
-
-
-
-
-
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram.png" width="45%" />
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/corner.png" width="45%" />
 ```
-<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/corner.png" width="45%" /><img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram.png" width="45%" />
+# plot interpolation
+plt.imshow(interp_data.reshape(xgrid.shape).T, origin='lower', extent=extent, vmin=-10.0, vmax=15.0)
+plt.scatter(obs_pos[:, 0], obs_pos[:, 1], c=obs_data, edgecolor='k', marker='o', vmin=-10.0, vmax=15.0)
+plt.colorbar(label="Interpolation")
+plt.show()
 
-<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/example.png" width="45%" /><img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/example_std.png" width="45%" />
+# plot standard deviation
+interp_std = np.sqrt(interp_var)
+plt.imshow(interp_std.reshape(xgrid.shape).T, origin='lower', extent=extent)
+plt.colorbar(label="Standard Deviation")
+plt.show()
+```
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/mean.png" width="45%" />
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/std.png" width="45%" />
 
 ## Issues and Contributing
 
