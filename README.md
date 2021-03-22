@@ -153,6 +153,7 @@ plt.colorbar(label="Truth")
 plt.tight_layout()
 ```
 <img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/truth.png" width="45%" />
+
 ```python
 # randomly sample observations of the "true" field
 obs_pos = np.random.uniform(-15.0, 15.0, size=(100, 2))
@@ -172,7 +173,8 @@ corner_fig.show()
 ```
 <img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram.png" width="45%" />
 <img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/corner.png" width="45%" />
-```
+
+```python
 # plot interpolation
 plt.imshow(interp_data.reshape(xgrid.shape).T, origin='lower', extent=extent, vmin=-10.0, vmax=15.0)
 plt.scatter(obs_pos[:, 0], obs_pos[:, 1], c=obs_data, edgecolor='k', marker='o', vmin=-10.0, vmax=15.0)
