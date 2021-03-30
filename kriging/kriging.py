@@ -126,7 +126,7 @@ class Kriging:
         self,
         model="gaussian",
         deg=0,
-        nbins=10,
+        nbins=6,
         bin_number=False,
         lag_cutoff=1.0,
     ):
