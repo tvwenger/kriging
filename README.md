@@ -1,24 +1,22 @@
-# kriging (v2.0)
+# kriging (v2.1)
 ### Ordinary and universal kriging in N dimensions.
 
 `kriging` is a basic implementation of
 [kriging](https://en.wikipedia.org/wiki/Kriging), a method of
 interpolation using Gaussian process regression. `kriging` supports
 ordinary kriging and universal kriging (using a polynomial drift
-term), and several semivariogram models.
+term), and several variogram models.
 
 In the presence of drift (a varying mean value across the data space),
-the observed semivariogram can be biased (see Starks & Fang, 1982,
+the observed variogram can be biased (see Starks & Fang, 1982,
 Mathematical Geology, 14, 4;
 https://doi.org/10.1007/BF01032592). `kriging` attempts to remove this
 bias by subtracting a fitted polynomial drift term before generating
-the semivariogram.
+the variogram.
 
 `kriging` also handles data uncertainties and covariances. If the
-data have associated errors, then the semivariogram model is derived
-from many Monte Carlo realizations of the data. The data variances and
-covariances are also factored into the kriging system of equations so that
-the interpolation variances reflect the observed data uncertainties (see,
+data have associated errors, then the data variances and
+covariances are factored into the kriging system of equations (see,
 for example, Cecinati et al., 2018, Atmosphere, 9(11), 446; https://doi.org/10.3390/atmos9110446).
 
 ## Installation
@@ -36,14 +34,14 @@ python setup.py install
 ```python
 from kriging import kriging
 krig = kriging.Kriging(obs_pos, obs_data, e_obs_data=e_obs_data, obs_data_cov=obs_data_cov)
-semivariogram_fig, corner_fig = krig.fit(
-    model=model, deg=deg, nbins=nbins, bin_number=bin_number, lag_cutoff=lag_cutoff, nsims=nsims)
-interp_data, interp_var = krig.interp(interp_pos)
+variogram_fig = krig.fit(
+    model=model, deg=deg, nbins=nbins, bin_number=bin_number, lag_cutoff=lag_cutoff)
+interp_data, interp_var = krig.interp(interp_pos, resample=resample)
 ```
 
 ## Functions & Arguments:
 
-### Object initialization
+### Object Initialization
 Intialize a new `Kriging` object.
 ```python
 krig = kriging.Kriging(obs_pos, obs_data, e_obs_data=e_obs_data, obs_data_cov=obs_data_cov)
@@ -61,41 +59,30 @@ krig = kriging.Kriging(obs_pos, obs_data, e_obs_data=e_obs_data, obs_data_cov=ob
   data uncertainties can be supplied via `e_obs_data`. If both
   are `None`, then data uncertainies are not considered in the kriging solution.
 
-### Fitting Semivariogram Model
-Fit and remove a polynomial drift component and then fit a semivariogram model to the
+### Fitting a Variogram Model
+Fit and remove a polynomial drift component and then fit a variogram model to the
 drift-subtracted data.
 ```python
-semivariogram_fig, corner_fig = krig.fit(
-    model=model, deg=deg, nbins=nbins, bin_number=bin_number, lag_cutoff=lag_cutoff, nsims=nsims)
+variogram_fig = krig.fit(
+    model=model, deg=deg, nbins=nbins, bin_number=bin_number, lag_cutoff=lag_cutoff)
 ```
-* `model` (optional) is the assumed semivariogram model. Available
+* `model` (optional) is the assumed variogram model. Available
   values can be found via: `from kriging import kriging; print(kriging._MODELS.keys())`
 * `deg` (optional) is the degree of the polynomial drift term. `deg=0`
   (default) is equivalent to ordinary kriging (no drift).
 * `nbins` (optional) is the number of lag bins to use when generating
-  the semivariogram. The default value is `6`.
+  the variogram. The default value is `6`.
 * `bin_number` (optional) is a flag to set how the lag bins are
   spaced. The default value is `False`, which means that the lag bins
   have equal width covering the full range of observed lags.  If
   `True`, then each lag bin includes the same number of data.
-* `lag_cutoff` (optional) is the maximum lag used to fit the semivariogram
+* `lag_cutoff` (optional) is the maximum lag used to fit the variogram
   relative to the maximum separation of the observed data. The value of
   this parameter should be between `0.0` (not inclusive) and `1.0` (inclusive,
   default). 
-* `nsims` (optional) is the number of Monte Carlo simulations to perform
-  when fitting the semivariogram model. The default is `1000`. This
-  parameter is silently ignored if both `e_obs_data` and `obs_data_cov` are `None`.
-* `semivariogram_fig` (optional) fitted semivariogram model plot.
-  If both `e_obs_data` and `obs_data_cov` are `None`, then this plot shows the semivariogram
-  and fitted semivariogram model. Otherwise, this plot shows the Monte Carlo distribution of
-  semivariogram bin mean values as a violin plot, 100 examples of the  fitted semivariogram
-  models, and the average semivariogram model.
-* `corner_fname` (optional) is the  semivariogram model parameter corner plot.
-  This plot shows the marginalized distributions of the semivariogram model parameters
-  determined from the Monte Carlo simulations. This return value is `None` if both `e_obs_data` and
-  `obs_data_cov` are `None` (i.e., there are no Monte Carlo samples to plot).
+* `variogram_fig` (optional) fitted variogram model plot (gammavariance vs. lag).
 
-Here is a visual representation of the available semivariogram models, each having
+Here is a visual representation of the available variogram models, each having
 parameters `nugget = 1.0`, `sill = 1.0`, and `range = 1.0`.
 <img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/models.png" width="45%" />
 
@@ -103,10 +90,14 @@ parameters `nugget = 1.0`, `sill = 1.0`, and `range = 1.0`.
 Solve the kriging system of equations and evaluate the interpolation and
 variance a given positions.
 ```python
-interp_data, interp_var = krig.interp(interp_pos)
+interp_data, interp_var = krig.interp(interp_pos, resample=resample)
 ```
 * `interp_pos` is the `LxM` scalar array of `L` Cartesian positions
   at which to calculate interpolated values.
+* `resample` (optional) is a flag to use resampled observed data to
+  solve the kriging system of equations. The observed data samples
+  are drawn from a multivariate normal distribution defined by the
+  observed data covariance matrix.
 * `interp_data` is the `L`-length scalar array of interpolated values at
   each `interp_pos` position.
 * `interp_var` is the `L`-length scalar array of variances at each
@@ -165,14 +156,12 @@ obs_data += e_obs_data * np.random.randn(len(obs_data))
 
 # universal kriging (deg=1)
 krig = kriging.Kriging(obs_pos, obs_data, e_obs_data=e_obs_data)
-semivariogram_fig, corner_fig = krig.fit(
-    model="wave", deg=1, nbins=10, nsims=1000, bin_number=False, lag_cutoff=0.5)
+variogram_fig = krig.fit(
+    model="wave", deg=1, nbins=10, bin_number=False, lag_cutoff=0.5)
 interp_data, interp_var = krig.interp(grid_pos)
-semivariogram_fig.show()
-corner_fig.show()
+variogram_fig.show()
 ```
-<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/semivariogram.png" width="45%" />
-<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/corner.png" width="45%" />
+<img src="https://raw.githubusercontent.com/tvwenger/kriging/master/example/variogram.png" width="45%" />
 
 ```python
 # plot interpolation
