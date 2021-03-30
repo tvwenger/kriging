@@ -1,7 +1,7 @@
 """
 models.py
 
-Semivariogram models.
+Variogram models.
 
 Copyright(C) 2021 by
 Trey V. Wenger; tvwenger@gmail.com
