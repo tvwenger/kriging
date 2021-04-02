@@ -129,6 +129,7 @@ class Kriging:
         nbins=6,
         bin_number=False,
         lag_cutoff=1.0,
+        plot=True,
     ):
         """
         Fit a polynomial drift and variogram model to the observed data.
@@ -147,10 +148,12 @@ class Kriging:
             lag_cutoff :: scalar between 0.0 and 1.0
                 Ignore points separated by more than this fraction of the
                 maximum lag when plotting and fitting the variogram.
+            plot :: boolean
+                If True (default), generate and return variogram plot
 
         Returns: variogram_fig
             variogram_fig :: matplotlib.pyplot.Figure
-                The variogram plot
+                The variogram plot. Value is None if plot = False.
         """
         # check inputs
         if deg < 0:
@@ -277,14 +280,17 @@ class Kriging:
         self.model_params = res.x
 
         # plot fitted variogram
-        xfit = np.linspace(0.0, 1.1 * lag_mean[-1], 100)
-        yfit = self.variogram(self.model_params, xfit)
-        variogram_fig, ax = plt.subplots()
-        ax.plot(lag_mean, gammavars, "ko")
-        ax.plot(xfit, yfit, "r-", linewidth=2.0)
-        ax.set_xlabel("Lag")
-        ax.set_ylabel(r"$\gamma$-variance")
-        variogram_fig.tight_layout()
+        if plot:
+            xfit = np.linspace(0.0, 1.1 * lag_mean[-1], 100)
+            yfit = self.variogram(self.model_params, xfit)
+            variogram_fig, ax = plt.subplots()
+            ax.plot(lag_mean, gammavars, "ko")
+            ax.plot(xfit, yfit, "r-", linewidth=2.0)
+            ax.set_xlabel("Lag")
+            ax.set_ylabel(r"$\gamma$-variance")
+            variogram_fig.tight_layout()
+        else:
+            variogram_fig = None
 
         # build kriging system of equations matrix
         self.krig_mat = np.zeros(

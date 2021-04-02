@@ -64,7 +64,7 @@ Fit and remove a polynomial drift component and then fit a variogram model to th
 drift-subtracted data.
 ```python
 variogram_fig = krig.fit(
-    model=model, deg=deg, nbins=nbins, bin_number=bin_number, lag_cutoff=lag_cutoff)
+    model=model, deg=deg, nbins=nbins, bin_number=bin_number, lag_cutoff=lag_cutoff, plot=plot)
 ```
 * `model` (optional) is the assumed variogram model. Available
   values can be found via: `from kriging import kriging; print(kriging._MODELS.keys())`
@@ -80,7 +80,8 @@ variogram_fig = krig.fit(
   relative to the maximum separation of the observed data. The value of
   this parameter should be between `0.0` (not inclusive) and `1.0` (inclusive,
   default). 
-* `variogram_fig` (optional) fitted variogram model plot (gammavariance vs. lag).
+* `plot` (optional) if True, generate and return variogram model plot.
+* `variogram_fig` (optional) fitted variogram model plot (gammavariance vs. lag). Value is `None` if `plot=False`.
 
 Here is a visual representation of the available variogram models, each having
 parameters `nugget = 1.0`, `sill = 1.0`, and `range = 1.0`.
