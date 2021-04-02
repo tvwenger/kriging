@@ -1,4 +1,4 @@
-# kriging (v2.1)
+# kriging (v2.2)
 ### Ordinary and universal kriging in N dimensions.
 
 `kriging` is a basic implementation of

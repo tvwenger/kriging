@@ -28,6 +28,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     Improve data uncertainty handling, rename "semivariogram"
     to "variogram" and "semivariance" to "gamma-variance" for
     clarity.
+2021-04-02 Trey V. Wenger - v2.2
+    Add plot flag to turn off plotting.
 """
 
 import numpy as np
@@ -37,7 +39,7 @@ import matplotlib.pyplot as plt
 
 from . import models
 
-_VERSION = "2.1"
+_VERSION = "2.2"
 
 _MODELS = {
     "linear": models.linear,
