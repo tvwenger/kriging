@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 2021-02-15 Trey V. Wenger
 2021-03-20 Trey V. Wenger - added linear, wave, quadratic, circular models
+2021-04-03 Trey V. Wenger - optimizations using numpy.piecewise and numpy.sinc
 """
 
 import numpy as np
@@ -30,10 +31,11 @@ import numpy as np
 
 def linear(theta, x):
     sill, range, nugget = theta
-    ret = np.ones(x.shape, dtype=x.dtype) * (sill + nugget)
-    c = x < range
-    ret[c] = nugget + sill / range * x[c]
-    return ret
+    return np.piecewise(
+        x,
+        [x < range, x >= range],
+        [lambda x: nugget + sill / range * x, nugget + sill],
+    )
 
 
 def gaussian(theta, x):
@@ -48,25 +50,21 @@ def exponential(theta, x):
 
 def spherical(theta, x):
     sill, range, nugget = theta
-    ret = np.ones(x.shape, dtype=x.dtype) * (sill + nugget)
-    c = x < range
-    ret[c] = (
-        sill
-        * ((3.0 * x[c]) / (2.0 * range) - (x[c] ** 3.0) / (2.0 * range ** 3.0))
-        + nugget
+    return np.piecewise(
+        x,
+        [x < range, x >= range],
+        [
+            lambda x: sill
+            * ((3.0 * x) / (2.0 * range) - (x ** 3.0) / (2.0 * range ** 3.0))
+            + nugget,
+            sill + nugget,
+        ],
     )
-    return ret
 
 
 def wave(theta, x):
     sill, range, nugget = theta
-    ret = np.ones(x.shape, dtype=x.dtype) * nugget
-    c = x > 0.0
-    ret[c] = (
-        sill * (1.0 - np.sin(3.0 * x[c] / range) / (3.0 * x[c] / range))
-        + nugget
-    )
-    return ret
+    return sill * (1.0 - np.sinc(3.0 * x / range / np.pi)) + nugget
 
 
 def quadratic(theta, x):
@@ -79,18 +77,17 @@ def quadratic(theta, x):
 
 def circular(theta, x):
     sill, range, nugget = theta
-    ret = np.ones(x.shape, dtype=x.dtype) * (sill + nugget)
-    c = x < range
-    ret[c] = (
-        sill
-        * (
-            1.0
-            - 2.0 / np.pi * np.arccos(x[c] / range)
-            + 2.0
-            * x[c]
-            / (np.pi * range)
-            * np.sqrt(1.0 - (x[c] / range) ** 2.0)
-        )
-        + nugget
+    return np.piecewise(
+        x,
+        [x < range, x >= range],
+        [
+            lambda x: sill
+            * (
+                1.0
+                - 2.0 / np.pi * np.arccos(x / range)
+                + 2.0 * x / (np.pi * range) * np.sqrt(1.0 - (x / range) ** 2.0)
+            )
+            + nugget,
+            sill + nugget,
+        ],
     )
-    return ret

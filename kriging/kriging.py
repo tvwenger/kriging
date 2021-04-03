@@ -39,7 +39,7 @@ import matplotlib.pyplot as plt
 
 from . import models
 
-_VERSION = "2.2"
+_VERSION = "2.3"
 
 _MODELS = {
     "linear": models.linear,
@@ -123,6 +123,7 @@ class Kriging:
         self.polynomial_design = None
         self.num_powers = None
         self.model_params = None
+        self.krig_mat = None
 
     def fit(
         self,
@@ -312,6 +313,7 @@ class Kriging:
             self.krig_mat[
                 : self.num_data, : self.num_data
             ] -= self.obs_data_cov
+        self.inv_krig_mat = np.linalg.inv(self.krig_mat)
         return variogram_fig
 
     def interp(self, interp_pos, resample=False):

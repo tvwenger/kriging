@@ -1,4 +1,4 @@
-# kriging (v2.2)
+# kriging (v2.3)
 ### Ordinary and universal kriging in N dimensions.
 
 `kriging` is a basic implementation of
@@ -129,10 +129,6 @@ def truth(pos):
     data += ring_amp * np.exp(-0.5 * ((radius - ring_rad)/ring_sig)**2.0)
     return data
 
-# generate some random data
-num_data = 100
-obs_pos = np.random.uniform(-15, 15, size=(num_data, 2))
-
 # interpolation grid
 xgrid, ygrid = np.mgrid[-15:15:100j, -15:15:100j]
 extent = [xgrid.min(), xgrid.max(), ygrid.min(), ygrid.max()]
@@ -148,7 +144,8 @@ plt.tight_layout()
 
 ```python
 # randomly sample observations of the "true" field
-obs_pos = np.random.uniform(-15.0, 15.0, size=(100, 2))
+num_data = 100
+obs_pos = np.random.uniform(-15.0, 15.0, size=(num_data, 2))
 obs_data = truth(obs_pos)
 
 # add some Gaussian noise
